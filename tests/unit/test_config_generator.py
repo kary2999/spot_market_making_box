@@ -12,7 +12,15 @@ import pytest
 
 from src.config_generator import (
     ConfigGenerator,
+    _build_price_ranges,
+    _calc_number_float,
+    _cumulative_qty,
+    _decimal_places,
     _floor_to_precision,
+    _format_price,
+    _format_qty,
+    _get_zone,
+    generate_configs,
 )
 
 
@@ -352,3 +360,232 @@ class TestExportJson:
             assert data["grid_mode"] == "geometric"
         finally:
             os.unlink(path)
+
+
+# ---------------------------------------------------------------------------
+# _get_zone
+# ---------------------------------------------------------------------------
+
+
+class TestGetZone:
+    def test_dom1_near(self):
+        assert _get_zone(1) == "near"
+
+    def test_dom2_mid(self):
+        assert _get_zone(2) == "mid"
+
+    def test_dom3_mid(self):
+        assert _get_zone(3) == "mid"
+
+    def test_dom4_far(self):
+        assert _get_zone(4) == "far"
+
+    def test_dom5_far(self):
+        assert _get_zone(5) == "far"
+
+    def test_dom6_far(self):
+        assert _get_zone(6) == "far"
+
+
+# ---------------------------------------------------------------------------
+# _decimal_places
+# ---------------------------------------------------------------------------
+
+
+class TestDecimalPlaces:
+    def test_two_decimal_places(self):
+        assert _decimal_places("0.01") == 2
+
+    def test_eight_decimal_places_normalized(self):
+        # "0.00100000" normalizes to "0.001" → 3 places
+        assert _decimal_places("0.00100000") == 3
+
+    def test_integer_tick_zero_places(self):
+        assert _decimal_places("1") == 0
+
+    def test_five_zeros_tick(self):
+        assert _decimal_places("0.00001") == 5
+
+
+# ---------------------------------------------------------------------------
+# _format_price / _format_qty
+# ---------------------------------------------------------------------------
+
+
+class TestFormatPrice:
+    def test_rounds_down_to_tick(self):
+        result = _format_price(Decimal("95000.999"), Decimal("0.01"))
+        assert result == "95000.99"
+
+    def test_exact_multiple_unchanged(self):
+        assert _format_price(Decimal("100.00"), Decimal("0.01")) == "100.00"
+
+    def test_integer_tick(self):
+        assert _format_price(Decimal("99.9"), Decimal("1")) == "99"
+
+
+class TestFormatQty:
+    def test_rounds_down(self):
+        result = _format_qty(Decimal("1.0059"), Decimal("0.001"))
+        assert result == "1.005"
+
+    def test_exact_qty(self):
+        assert _format_qty(Decimal("2.500"), Decimal("0.001")) == "2.500"
+
+
+# ---------------------------------------------------------------------------
+# _cumulative_qty
+# ---------------------------------------------------------------------------
+
+
+class TestCumulativeQty:
+    def test_sums_first_n(self):
+        side = [["100", "2.0"], ["99", "3.0"], ["98", "5.0"]]
+        assert _cumulative_qty(side, 2) == Decimal("5.0")
+
+    def test_depth_exceeds_length(self):
+        side = [["100", "1.0"], ["99", "1.0"]]
+        assert _cumulative_qty(side, 10) == Decimal("2.0")
+
+    def test_zero_depth_returns_zero(self):
+        side = [["100", "1.0"]]
+        assert _cumulative_qty(side, 0) == Decimal("0")
+
+    def test_string_qty_parsed(self):
+        side = [["100.5", "0.500"]]
+        assert _cumulative_qty(side, 1) == Decimal("0.5")
+
+
+# ---------------------------------------------------------------------------
+# _calc_number_float
+# ---------------------------------------------------------------------------
+
+# 简单盘口：买卖各 20 档，每档 qty=1
+_SIDE_20 = [[str(i), "1.0"] for i in range(1, 21)]
+_ORDER_BOOK = {"bids": _SIDE_20, "asks": _SIDE_20}
+_STEP = Decimal("0.001")
+
+
+class TestCalcNumberFloat:
+    def test_near_returns_range_string(self):
+        result = _calc_number_float(_ORDER_BOOK, "near", _STEP)
+        assert "-" in result
+
+    def test_min_less_than_max(self):
+        result = _calc_number_float(_ORDER_BOOK, "mid", _STEP)
+        lo, hi = result.split("-")
+        assert Decimal(lo) < Decimal(hi)
+
+    def test_far_zone_no_crash(self):
+        result = _calc_number_float(_ORDER_BOOK, "far", _STEP)
+        assert "-" in result
+
+    def test_small_order_book_no_crash(self):
+        small = {"bids": [["100", "0.001"]], "asks": [["101", "0.001"]]}
+        result = _calc_number_float(small, "near", Decimal("0.001"))
+        assert "-" in result
+
+
+# ---------------------------------------------------------------------------
+# _build_price_ranges
+# ---------------------------------------------------------------------------
+
+
+class TestBuildPriceRanges:
+    def test_count_matches_levels(self):
+        ranges = _build_price_ranges(100.0, Decimal("0.01"), 6, -1)
+        assert len(ranges) == 6
+
+    def test_sell_each_range_low_lt_high(self):
+        for lo, hi in _build_price_ranges(100.0, Decimal("0.01"), 6, -1):
+            assert hi > lo
+
+    def test_buy_price_not_negative(self):
+        for lo, _ in _build_price_ranges(0.01, Decimal("0.01"), 6, 1):
+            assert lo >= Decimal("0")
+
+    def test_sell_ranges_contiguous(self):
+        ranges = _build_price_ranges(100.0, Decimal("0.01"), 6, -1)
+        for i in range(1, len(ranges)):
+            assert ranges[i][0] == ranges[i - 1][1]
+
+    def test_buy_ranges_contiguous(self):
+        ranges = _build_price_ranges(100.0, Decimal("0.01"), 6, 1)
+        for i in range(1, len(ranges)):
+            assert ranges[i][1] == ranges[i - 1][0]
+
+
+# ---------------------------------------------------------------------------
+# generate_configs
+# ---------------------------------------------------------------------------
+
+_EXCHANGE_INFO = {"tickSize": "0.01", "stepSize": "0.001"}
+
+
+class TestGenerateConfigs:
+    def _call(self, **kwargs):
+        defaults = dict(
+            symbol="BTCUSDT",
+            levels=6,
+            total_usdt=1000.0,
+            pid=42,
+            current_price=95000.0,
+            exchange_info=_EXCHANGE_INFO,
+            order_book=_ORDER_BOOK,
+        )
+        defaults.update(kwargs)
+        return generate_configs(**defaults)
+
+    def test_total_count_is_levels_times_two(self):
+        assert len(self._call()) == 12  # 6 levels × 2 directions
+
+    def test_required_keys_present(self):
+        required = {
+            "box_id", "pid", "direction", "dom", "trust_num",
+            "price_float", "number_float", "change_trust_num",
+            "change_number_float", "change_survival_time", "status",
+        }
+        for c in self._call():
+            assert required.issubset(c.keys())
+
+    def test_pid_matches_input(self):
+        for c in self._call(pid=99):
+            assert c["pid"] == 99
+
+    def test_both_directions_present(self):
+        directions = {c["direction"] for c in self._call()}
+        assert directions == {-1, 1}
+
+    def test_dom_range_1_to_levels(self):
+        doms = {c["dom"] for c in self._call()}
+        assert doms == set(range(1, 7))
+
+    def test_status_always_one(self):
+        for c in self._call():
+            assert c["status"] == 1
+
+    def test_box_id_is_none(self):
+        for c in self._call():
+            assert c["box_id"] is None
+
+    def test_dom1_change_trust_num_zero(self):
+        for c in self._call():
+            if c["dom"] == 1:
+                assert c["change_trust_num"] == 0
+
+    def test_dom_gt_1_change_trust_num_one(self):
+        for c in self._call():
+            if c["dom"] > 1:
+                assert c["change_trust_num"] == 1
+
+    def test_price_float_contains_dash(self):
+        for c in self._call():
+            assert "-" in c["price_float"]
+
+    def test_direction_labels_in_internal_field(self):
+        labels = {c["_direction_label"] for c in self._call()}
+        assert labels == {"买", "卖"}
+
+    def test_zone_field_present(self):
+        for c in self._call():
+            assert c.get("_zone") in ("near", "mid", "far")

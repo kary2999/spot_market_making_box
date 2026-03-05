@@ -3,6 +3,7 @@
 import pytest
 
 from agent_manage import Agent, AgentManager, AgentStatus, AgentType
+from tests.mocks.mock_storage import MockStorage
 
 
 @pytest.fixture
@@ -31,3 +32,41 @@ def populated_manager(manager, chat_agent, task_agent):
     manager.register(task_agent)
     manager.register(monitor)
     return manager
+
+
+@pytest.fixture
+def idle_agent():
+    """An IDLE agent for lifecycle tests."""
+    return Agent(name="idle-agent", agent_type=AgentType.CHAT)
+
+
+@pytest.fixture
+def running_agent():
+    """A RUNNING agent for lifecycle tests."""
+    agent = Agent(name="running-agent", agent_type=AgentType.CHAT)
+    agent.start()
+    return agent
+
+
+@pytest.fixture
+def agent_with_hooks():
+    """An agent paired with a call tracker (used to verify stop was called)."""
+    from tests.mocks.mock_hooks import CallTracker
+    tracker = CallTracker()
+    agent = Agent(name="hooked-agent", agent_type=AgentType.CHAT)
+    return agent, tracker
+
+
+@pytest.fixture
+def empty_manager():
+    """An empty AgentManager."""
+    return AgentManager()
+
+
+@pytest.fixture
+def manager_with_mock_storage():
+    """AgentManager whose internal _agents dict is replaced with MockStorage."""
+    mgr = AgentManager()
+    storage = MockStorage()
+    mgr._agents = storage
+    return mgr, storage

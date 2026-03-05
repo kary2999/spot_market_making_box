@@ -124,12 +124,18 @@ class TestGetTickSize:
 
     @patch("src.binance_api.requests.get")
     def test_falls_back_to_lot_size_when_no_price_filter(self, mock_get):
+        # LOT_SIZE 过滤器只有 stepSize，无 tickSize 字段（符合真实 Binance API）
         data = {
             "symbols": [
                 {
                     "symbol": "TESTUSDT",
                     "filters": [
-                        {"filterType": "LOT_SIZE", "tickSize": "0.001", "stepSize": "0.001"},
+                        {
+                            "filterType": "LOT_SIZE",
+                            "minQty": "0.001",
+                            "maxQty": "100.0",
+                            "stepSize": "0.001",
+                        },
                     ],
                 }
             ]
@@ -137,6 +143,31 @@ class TestGetTickSize:
         mock_get.return_value = _mock_response(data)
         tick = get_tick_size("TESTUSDT")
         assert tick == "0.001"
+
+    @patch("src.binance_api.requests.get")
+    def test_lot_size_fallback_reads_step_size_field(self, mock_get):
+        """回归测试: LOT_SIZE 使用 stepSize 字段，而非 tickSize。
+        stepSize 与假设的 tickSize 取不同值，以区分读取了哪个字段。
+        """
+        data = {
+            "symbols": [
+                {
+                    "symbol": "XYZUSDT",
+                    "filters": [
+                        {
+                            "filterType": "LOT_SIZE",
+                            "minQty": "1.0",
+                            "maxQty": "900000.0",
+                            "stepSize": "0.10000000",  # 正确字段
+                        },
+                    ],
+                }
+            ]
+        }
+        mock_get.return_value = _mock_response(data)
+        tick = get_tick_size("XYZUSDT")
+        # 必须返回 stepSize 的值；若代码误用 tickSize 则 KeyError
+        assert tick == "0.10000000"
 
     @patch("src.binance_api.requests.get")
     def test_raises_value_error_when_symbols_empty(self, mock_get):

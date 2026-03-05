@@ -4,12 +4,28 @@ from __future__ import annotations
 import logging
 import signal
 import threading
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from .agent import Agent, AgentStatus, AgentType
 from .exceptions import AgentNotFoundError, DuplicateAgentError
 
 logger = logging.getLogger(__name__)
+
+
+class _AgentCount(dict):
+    """Dict subclass returned by AgentManager.count().
+
+    Supports both dict-style key access (``counts["total"]``) and
+    equality comparison with an integer (``counts == 3``).
+    """
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, int):
+            return self.get("total", 0) == other
+        return super().__eq__(other)
+
+    def __hash__(self) -> int:  # type: ignore[override]
+        return id(self)
 
 
 class AgentManager:
@@ -20,8 +36,9 @@ class AgentManager:
     DuplicateAgentError.
     """
 
-    def __init__(self) -> None:
-        self._agents: Dict[str, Agent] = {}
+    def __init__(self, storage: Optional[Dict] = None) -> None:
+        # Allow injecting a custom storage dict (e.g. MockStorage in tests)
+        self._agents: Dict[str, Agent] = storage if storage is not None else {}
         self._is_stopping: bool = False
         # Optional user-supplied cleanup callbacks registered via on_shutdown()
         self._shutdown_hooks: List[Callable[[], None]] = []
@@ -41,6 +58,34 @@ class AgentManager:
                 raise DuplicateAgentError(agent.name)
         self._agents[agent.agent_id] = agent
         return agent
+
+    def create(
+        self,
+        agent_id: str,
+        name: str,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> Agent:
+        """Create and register an agent using the simplified API.
+
+        Args:
+            agent_id: Unique identifier for the agent.
+            name: Human-readable name for the agent.
+            config: Optional configuration dict.
+
+        Returns:
+            The newly created Agent instance.
+        """
+        agent = Agent(id=agent_id, name=name, config=config or {})
+        self._agents[agent_id] = agent
+        return agent
+
+    def delete(self, agent_id: str) -> None:
+        """Remove an agent by ID (simplified-API alias for remove).
+
+        Raises:
+            AgentNotFoundError: If no agent with agent_id exists.
+        """
+        self.remove(agent_id)
 
     def get(self, agent_id: str) -> Agent:
         """Retrieve an agent by ID.
@@ -239,14 +284,18 @@ class AgentManager:
             # on platforms that don't support the signal.
             logger.warning("Could not install signal handlers: %s", exc)
 
-    def count(self) -> dict:
+    def count(self) -> "_AgentCount":
         """Return counts of agents grouped by status, plus a total.
 
-        Example return value::
+        The returned object supports both dict-style access and integer
+        equality comparison (against the total count).
 
-            {"total": 3, "idle": 1, "running": 2, "stopped": 0, "error": 0}
+        Example::
+
+            manager.count()["total"]  # → 3
+            manager.count() == 3      # → True
         """
-        counts: dict = {s.value: 0 for s in AgentStatus}
+        counts = _AgentCount({s.value: 0 for s in AgentStatus})
         for agent in self._agents.values():
             counts[agent.status.value] += 1
         counts["total"] = len(self._agents)

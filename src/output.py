@@ -57,8 +57,7 @@ def generate_sql(configs: List[dict], output_path: str) -> None:
     fields_str = ", ".join(_SQL_FIELDS)
 
     sql = (
-        f"INSERT INTO spot_market_making_box\n"
-        f"  ({fields_str})\n"
+        f"INSERT INTO spot_market_making_box ({fields_str})\n"
         f"VALUES\n"
         + ",\n".join(rows)
         + ";\n"

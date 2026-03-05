@@ -16,7 +16,7 @@ def assert_agent_dict(result: dict[str, Any], expected: dict[str, Any]) -> None:
 
     Example::
 
-        assert_agent_dict(agent.to_dict(), {"id": "x", "name": "X", "status": "idle"})
+        assert_agent_dict(agent.to_dict(), {"agent_id": "x", "name": "X", "status": "idle"})
     """
     ignore_keys = {"created_at"}
     filtered_result = {k: v for k, v in result.items() if k not in ignore_keys}
@@ -37,7 +37,7 @@ def assert_status(agent: Agent, expected: AgentStatus) -> None:
         assert_status(agent, AgentStatus.RUNNING)
     """
     assert agent.status == expected, (
-        f"Agent '{agent.id}' status mismatch: "
+        f"Agent '{agent.agent_id}' status mismatch: "
         f"got '{agent.status.value}', expected '{expected.value}'"
     )
 

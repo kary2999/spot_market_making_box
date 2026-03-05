@@ -55,8 +55,9 @@ def get_tick_size(symbol: str) -> str:
 
     if "PRICE_FILTER" in filters:
         return filters["PRICE_FILTER"]["tickSize"]
+    # LOT_SIZE 过滤器使用 stepSize 字段，而非 tickSize
     if "LOT_SIZE" in filters:
-        return filters["LOT_SIZE"]["tickSize"]
+        return filters["LOT_SIZE"]["stepSize"]
 
     raise ValueError(f"未找到 tickSize 信息: {symbol}")
 

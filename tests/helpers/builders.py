@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
-from agent_manage.agent import Agent, AgentStatus
+from agent_manage.agent import Agent, AgentStatus, AgentType
 
 
 class AgentBuilder:
@@ -73,11 +73,10 @@ class AgentBuilder:
 
     def build(self) -> Agent:
         agent = Agent(
-            id=self._id,
             name=self._name,
-            config=self._config.copy(),
-            _on_start=self._on_start,
-            _on_stop=self._on_stop,
+            agent_type=AgentType.CHAT,
+            metadata=self._config.copy(),
         )
+        agent.agent_id = self._id
         agent.status = self._status
         return agent
