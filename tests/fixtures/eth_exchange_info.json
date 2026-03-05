@@ -1,0 +1,30 @@
+{
+  "timezone": "UTC",
+  "serverTime": 1700000000000,
+  "symbols": [
+    {
+      "symbol": "ETHUSDT",
+      "status": "TRADING",
+      "baseAsset": "ETH",
+      "quoteAsset": "USDT",
+      "filters": [
+        {
+          "filterType": "PRICE_FILTER",
+          "minPrice": "0.01",
+          "maxPrice": "100000.00",
+          "tickSize": "0.01"
+        },
+        {
+          "filterType": "LOT_SIZE",
+          "minQty": "0.0001",
+          "maxQty": "90000.00",
+          "stepSize": "0.0001"
+        },
+        {
+          "filterType": "MIN_NOTIONAL",
+          "minNotional": "5.00"
+        }
+      ]
+    }
+  ]
+}

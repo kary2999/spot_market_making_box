@@ -1,0 +1,30 @@
+{
+  "timezone": "UTC",
+  "serverTime": 1700000000000,
+  "symbols": [
+    {
+      "symbol": "SHIBUSDT",
+      "status": "TRADING",
+      "baseAsset": "SHIB",
+      "quoteAsset": "USDT",
+      "filters": [
+        {
+          "filterType": "PRICE_FILTER",
+          "minPrice": "0.000001",
+          "maxPrice": "1.000000",
+          "tickSize": "0.000001"
+        },
+        {
+          "filterType": "LOT_SIZE",
+          "minQty": "1.00",
+          "maxQty": "99999999.00",
+          "stepSize": "1.00"
+        },
+        {
+          "filterType": "MIN_NOTIONAL",
+          "minNotional": "1.00"
+        }
+      ]
+    }
+  ]
+}

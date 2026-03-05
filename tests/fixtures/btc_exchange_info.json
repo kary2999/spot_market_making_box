@@ -1,0 +1,30 @@
+{
+  "timezone": "UTC",
+  "serverTime": 1700000000000,
+  "symbols": [
+    {
+      "symbol": "BTCUSDT",
+      "status": "TRADING",
+      "baseAsset": "BTC",
+      "quoteAsset": "USDT",
+      "filters": [
+        {
+          "filterType": "PRICE_FILTER",
+          "minPrice": "0.01",
+          "maxPrice": "1000000.00",
+          "tickSize": "0.01"
+        },
+        {
+          "filterType": "LOT_SIZE",
+          "minQty": "0.00001",
+          "maxQty": "9000.00",
+          "stepSize": "0.00001"
+        },
+        {
+          "filterType": "MIN_NOTIONAL",
+          "minNotional": "5.00"
+        }
+      ]
+    }
+  ]
+}
