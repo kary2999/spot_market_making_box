@@ -19,3 +19,11 @@ class DuplicateAgentError(AgentError):
     def __init__(self, name: str) -> None:
         super().__init__(f"An agent named '{name}' already exists")
         self.name = name
+
+
+class AgentAlreadyRunningError(AgentError):
+    """Raised when attempting to start an agent that is already running."""
+
+    def __init__(self, agent_id: str) -> None:
+        super().__init__(f"Agent '{agent_id}' is already running")
+        self.agent_id = agent_id

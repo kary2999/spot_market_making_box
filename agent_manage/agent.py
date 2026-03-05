@@ -64,9 +64,13 @@ class Agent:
     def stop(self) -> None:
         """Transition agent to STOPPED.
 
+        Idempotent: calling stop() on an already-stopped agent is a no-op.
+
         Raises:
-            ValueError: If agent is not currently running.
+            ValueError: If agent is in a state other than RUNNING or STOPPED.
         """
+        if self.status == AgentStatus.STOPPED:
+            return
         if self.status != AgentStatus.RUNNING:
             raise ValueError(f"Agent '{self.agent_id}' is not running")
         self.status = AgentStatus.STOPPED
