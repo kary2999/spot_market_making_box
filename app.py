@@ -10,9 +10,12 @@ from flask import Flask, redirect, send_from_directory, url_for
 
 from auth.models import init_db, seed_demo_user
 from auth.routes import bp as auth_bp
+from portal.models import init_portal_db
+from portal.routes import bp as portal_bp
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.register_blueprint(auth_bp)
+app.register_blueprint(portal_bp)
 
 
 @app.route("/")
@@ -34,5 +37,6 @@ def unauthorized(e):
 if __name__ == "__main__":
     init_db()
     seed_demo_user()
+    init_portal_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(debug=os.environ.get("FLASK_ENV") != "production", port=port)
