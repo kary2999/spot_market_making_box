@@ -1,80 +1,76 @@
-"""Binance REST API client.
-
-Provides helpers for the three endpoints needed by the spot market-making
-configuration generator:
-  - ticker/price      -> current market price
-  - exchangeInfo      -> tick/step size, minQty
-  - depth             -> top-N order book levels
 """
-from __future__ import annotations
+币安公共 REST API 封装
+提供价格查询、tickSize 精度获取、盘口深度查询功能
+"""
 
-from typing import Any
+from __future__ import annotations
 
 import requests
 
-BINANCE_BASE_URL = "https://api.binance.com/api/v3"
-DEFAULT_TIMEOUT = 10  # seconds
+BASE_URL = "https://api.binance.com"
+_TIMEOUT = 10  # 请求超时时间（秒）
 
 
-def _format_symbol(symbol: str) -> str:
-    """Convert 'btc_usdt' -> 'BTCUSDT'."""
-    return symbol.replace("_", "").upper()
+def _get(path: str, params: dict | None = None) -> dict:
+    """发送 GET 请求，统一处理超时与 HTTP 错误"""
+    url = BASE_URL + path
+    response = requests.get(url, params=params, timeout=_TIMEOUT)
+    if not response.ok:
+        raise RuntimeError(
+            f"币安 API 请求失败: HTTP {response.status_code} - {response.text}"
+        )
+    return response.json()
 
 
-def get_ticker_price(symbol: str, timeout: int = DEFAULT_TIMEOUT) -> float:
-    """Return the latest trade price for *symbol* as a float."""
-    binance_symbol = _format_symbol(symbol)
-    url = f"{BINANCE_BASE_URL}/ticker/price"
-    response = requests.get(url, params={"symbol": binance_symbol}, timeout=timeout)
-    response.raise_for_status()
-    data = response.json()
-    if "price" not in data:
-        raise ValueError(f"Unexpected response format - 'price' key missing: {data}")
+def get_price(symbol: str) -> float:
+    """获取指定交易对的最新价格
+
+    Args:
+        symbol: 交易对，如 "BTCUSDT"
+
+    Returns:
+        最新价格浮点数
+    """
+    data = _get("/api/v3/ticker/price", params={"symbol": symbol})
     return float(data["price"])
 
 
-def get_exchange_info(symbol: str, timeout: int = DEFAULT_TIMEOUT) -> dict[str, Any]:
-    """Return tick/step size and minQty for *symbol*.
+def get_tick_size(symbol: str) -> str:
+    """获取指定交易对的 tickSize 精度字符串
 
-    Returns dict with keys: tickSize (str), stepSize (str), minQty (str).
+    优先从 PRICE_FILTER 中读取 tickSize，若不存在则从 LOT_SIZE 中读取。
+
+    Args:
+        symbol: 交易对，如 "BTCUSDT"
+
+    Returns:
+        tickSize 字符串，如 "0.01000000"
     """
-    binance_symbol = _format_symbol(symbol)
-    url = f"{BINANCE_BASE_URL}/exchangeInfo"
-    response = requests.get(url, params={"symbol": binance_symbol}, timeout=timeout)
-    response.raise_for_status()
-    data = response.json()
+    data = _get("/api/v3/exchangeInfo", params={"symbol": symbol})
+    symbols = data.get("symbols", [])
+    if not symbols:
+        raise ValueError(f"未找到交易对信息: {symbol}")
 
-    result: dict[str, Any] = {}
-    for symbol_info in data.get("symbols", []):
-        if symbol_info.get("symbol") == binance_symbol:
-            for f in symbol_info.get("filters", []):
-                if f.get("filterType") == "PRICE_FILTER":
-                    result["tickSize"] = f["tickSize"]
-                elif f.get("filterType") == "LOT_SIZE":
-                    result["stepSize"] = f["stepSize"]
-                    result["minQty"] = f["minQty"]
-            break
+    filters = {f["filterType"]: f for f in symbols[0].get("filters", [])}
 
-    if not result:
-        raise ValueError(f"Symbol '{binance_symbol}' not found in exchangeInfo response")
-    if "tickSize" not in result:
-        raise ValueError(f"PRICE_FILTER missing for '{binance_symbol}'")
-    if "stepSize" not in result:
-        raise ValueError(f"LOT_SIZE filter missing for '{binance_symbol}'")
-    return result
+    if "PRICE_FILTER" in filters:
+        return filters["PRICE_FILTER"]["tickSize"]
+    if "LOT_SIZE" in filters:
+        return filters["LOT_SIZE"]["tickSize"]
+
+    raise ValueError(f"未找到 tickSize 信息: {symbol}")
 
 
-def get_order_book_depth(
-    symbol: str, limit: int = 20, timeout: int = DEFAULT_TIMEOUT
-) -> dict[str, Any]:
-    """Return order book depth with *limit* levels for *symbol*."""
-    binance_symbol = _format_symbol(symbol)
-    url = f"{BINANCE_BASE_URL}/depth"
-    response = requests.get(
-        url, params={"symbol": binance_symbol, "limit": limit}, timeout=timeout
-    )
-    response.raise_for_status()
-    data = response.json()
-    if "bids" not in data or "asks" not in data:
-        raise ValueError(f"Unexpected depth response format - missing bids/asks: {data}")
-    return data
+def get_order_book(symbol: str, limit: int = 20) -> dict:
+    """获取指定交易对的盘口深度
+
+    Args:
+        symbol: 交易对，如 "BTCUSDT"
+        limit:  返回档位数量，默认 20，可选 5/10/20/50/100/500/1000/5000
+
+    Returns:
+        包含 bids（买盘）和 asks（卖盘）的字典，格式：
+        {"bids": [["price", "qty"], ...], "asks": [["price", "qty"], ...]}
+    """
+    data = _get("/api/v3/depth", params={"symbol": symbol, "limit": limit})
+    return {"bids": data["bids"], "asks": data["asks"]}
