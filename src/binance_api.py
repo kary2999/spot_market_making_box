@@ -35,6 +35,38 @@ def get_price(symbol: str) -> float:
     return float(data["price"])
 
 
+def get_exchange_info(symbol: str) -> dict:
+    """获取指定交易对的 tickSize 和 stepSize 精度信息
+
+    Args:
+        symbol: 交易对，如 "BTCUSDT"
+
+    Returns:
+        包含 tickSize 和 stepSize 的字典
+    """
+    data = _get("/api/v3/exchangeInfo", params={"symbol": symbol})
+    symbols = data.get("symbols", [])
+    if not symbols:
+        raise ValueError(f"未找到交易对信息: {symbol}")
+
+    filters = {f["filterType"]: f for f in symbols[0].get("filters", [])}
+
+    tick_size = None
+    step_size = None
+
+    if "PRICE_FILTER" in filters:
+        tick_size = filters["PRICE_FILTER"]["tickSize"]
+    if "LOT_SIZE" in filters:
+        step_size = filters["LOT_SIZE"]["stepSize"]
+        if tick_size is None:
+            tick_size = step_size
+
+    if tick_size is None or step_size is None:
+        raise ValueError(f"未找到 tickSize/stepSize 信息: {symbol}")
+
+    return {"tickSize": tick_size, "stepSize": step_size}
+
+
 def get_tick_size(symbol: str) -> str:
     """获取指定交易对的 tickSize 精度字符串
 

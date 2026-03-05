@@ -6,7 +6,7 @@ pytest 全局配置与 fixture 定义
 """
 import pytest
 
-from agent_manage.agent import Agent, AgentStatus
+from agent_manage.agent import Agent, AgentStatus, AgentType
 from agent_manage.manager import AgentManager
 from tests.fixtures.agent_fixtures import make_agent, make_manager
 from tests.helpers.builders import AgentBuilder
@@ -42,20 +42,50 @@ def agent_with_config() -> Agent:
 
 
 # ------------------------------------------------------------------
+# 类型化 Agent fixture（供 manager/integration 测试使用）
+# ------------------------------------------------------------------
+
+
+@pytest.fixture
+def chat_agent() -> Agent:
+    """CHAT 类型 Agent，名称为 chat-bot"""
+    return Agent(name="chat-bot", agent_type=AgentType.CHAT)
+
+
+@pytest.fixture
+def task_agent() -> Agent:
+    """TASK 类型 Agent，名称为 task-runner"""
+    return Agent(name="task-runner", agent_type=AgentType.TASK)
+
+
+# ------------------------------------------------------------------
 # AgentManager fixture
 # ------------------------------------------------------------------
 
 
 @pytest.fixture
+def manager() -> AgentManager:
+    """空的 AgentManager，适合测试注册 / CRUD 逻辑"""
+    return AgentManager()
+
+
+@pytest.fixture
 def empty_manager() -> AgentManager:
-    """空的 AgentManager，适合测试创建逻辑"""
+    """空的 AgentManager（make_manager 风格，兼容旧测试）"""
     return make_manager(pre_populate=False)
 
 
 @pytest.fixture
-def populated_manager() -> AgentManager:
-    """预填充了 3 个 Agent 的 Manager，适合测试读取/删除逻辑"""
-    return make_manager(pre_populate=True)
+def populated_manager(chat_agent: Agent, task_agent: Agent) -> AgentManager:
+    """预填充了 3 个 Agent 的 Manager（chat-bot / task-runner / sys-monitor）。
+
+    chat_agent 与 task_agent 与同名 fixture 是同一对象，支持 `is` 断言。
+    """
+    m = AgentManager()
+    m.register(chat_agent)
+    m.register(task_agent)
+    m.register(Agent(name="sys-monitor", agent_type=AgentType.MONITOR))
+    return m
 
 
 @pytest.fixture

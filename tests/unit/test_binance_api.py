@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import src.binance_api as binance_api
-from src.binance_api import get_order_book, get_price, get_tick_size
+from src.binance_api import get_exchange_info, get_order_book, get_price, get_tick_size
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 
@@ -271,3 +271,68 @@ class TestGetOrderBook:
         mock_get.return_value = _mock_response({"asks": [["100.0", "1.0"]]})
         with pytest.raises(KeyError):
             get_order_book("BTCUSDT")
+
+
+# ---------------------------------------------------------------------------
+# get_exchange_info
+# ---------------------------------------------------------------------------
+
+
+class TestGetExchangeInfo:
+    @patch("src.binance_api.requests.get")
+    def test_returns_tick_and_step_size(self, mock_get):
+        mock_get.return_value = _mock_response(_load("btc_exchange_info.json"))
+        info = get_exchange_info("BTCUSDT")
+        assert "tickSize" in info
+        assert "stepSize" in info
+
+    @patch("src.binance_api.requests.get")
+    def test_tick_size_from_price_filter(self, mock_get):
+        mock_get.return_value = _mock_response(_load("btc_exchange_info.json"))
+        info = get_exchange_info("BTCUSDT")
+        assert info["tickSize"] == "0.01"
+
+    @patch("src.binance_api.requests.get")
+    def test_both_fields_are_strings(self, mock_get):
+        mock_get.return_value = _mock_response(_load("btc_exchange_info.json"))
+        info = get_exchange_info("BTCUSDT")
+        assert isinstance(info["tickSize"], str)
+        assert isinstance(info["stepSize"], str)
+
+    @patch("src.binance_api.requests.get")
+    def test_raises_value_error_when_symbols_empty(self, mock_get):
+        mock_get.return_value = _mock_response({"symbols": []})
+        with pytest.raises(ValueError, match="未找到交易对信息"):
+            get_exchange_info("BTCUSDT")
+
+    @patch("src.binance_api.requests.get")
+    def test_raises_value_error_when_no_filters(self, mock_get):
+        data = {"symbols": [{"symbol": "BTCUSDT", "filters": []}]}
+        mock_get.return_value = _mock_response(data)
+        with pytest.raises(ValueError, match="未找到 tickSize/stepSize 信息"):
+            get_exchange_info("BTCUSDT")
+
+    @patch("src.binance_api.requests.get")
+    def test_lot_size_fallback_sets_tick_size(self, mock_get):
+        """当无 PRICE_FILTER 时，tickSize 回退为 LOT_SIZE 的 stepSize"""
+        data = {
+            "symbols": [
+                {
+                    "symbol": "TESTUSDT",
+                    "filters": [
+                        {"filterType": "LOT_SIZE", "minQty": "0.001",
+                         "maxQty": "100.0", "stepSize": "0.001"},
+                    ],
+                }
+            ]
+        }
+        mock_get.return_value = _mock_response(data)
+        info = get_exchange_info("TESTUSDT")
+        assert info["tickSize"] == "0.001"
+        assert info["stepSize"] == "0.001"
+
+    @patch("src.binance_api.requests.get")
+    def test_raises_on_http_error(self, mock_get):
+        mock_get.return_value = _mock_response({}, ok=False, status_code=500)
+        with pytest.raises(RuntimeError, match="HTTP 500"):
+            get_exchange_info("BTCUSDT")

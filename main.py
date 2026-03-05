@@ -37,7 +37,7 @@ def main() -> None:
     try:
         # 1. 查询币安行情
         print("[信息] 正在查询币安当前价格...")
-        current_price = binance_api.get_ticker_price(symbol)
+        current_price = binance_api.get_price(symbol)
         print(f"[信息] 当前价格: {current_price}")
 
         print("[信息] 正在查询交易规则（tickSize/stepSize）...")
@@ -45,7 +45,7 @@ def main() -> None:
         print(f"[信息] tickSize={exchange_info['tickSize']}, stepSize={exchange_info['stepSize']}")
 
         print("[信息] 正在查询盘口深度...")
-        order_book = binance_api.get_order_book_depth(symbol, limit=20)
+        order_book = binance_api.get_order_book(symbol, limit=20)
         print(f"[信息] 获取到 {len(order_book['bids'])} 档买盘 / {len(order_book['asks'])} 档卖盘")
 
         # 2. 生成配置

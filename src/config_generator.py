@@ -172,7 +172,8 @@ def generate_configs(
             change_number_float = number_float
 
             change_trust_num = 0 if dom in ZONE_NEAR else 1
-            change_survival_time = SURVIVAL_TIME[dom]
+            # 超出预定义范围的 dom 使用最后一档的存活时间，与 TICK_WIDTHS 的 .get() 保持一致
+            change_survival_time = SURVIVAL_TIME.get(dom, SURVIVAL_TIME[max(SURVIVAL_TIME)])
 
             configs.append({
                 "box_id": None,
