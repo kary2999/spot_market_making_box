@@ -1,6 +1,14 @@
-# agent_manage: AI Agent 管理核心模块
-from .agent import Agent, AgentStatus
+# agent_manage: AI Agent management core module
+from .agent import Agent, AgentStatus, AgentType
+from .exceptions import AgentError, AgentNotFoundError, DuplicateAgentError
 from .manager import AgentManager
-from .exceptions import AgentError, AgentNotFoundError
 
-__all__ = ["Agent", "AgentStatus", "AgentManager", "AgentError", "AgentNotFoundError"]
+__all__ = [
+    "Agent",
+    "AgentStatus",
+    "AgentType",
+    "AgentManager",
+    "AgentError",
+    "AgentNotFoundError",
+    "DuplicateAgentError",
+]
