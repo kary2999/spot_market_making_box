@@ -3,8 +3,12 @@
 根据币安 API 数据生成所有档位的铺单参数
 """
 
+from __future__ import annotations
+
+import json
 import math
 from decimal import Decimal, ROUND_DOWN
+from typing import List
 
 
 # 各档位 trust_num 分配比例（共 6 档）
@@ -189,3 +193,132 @@ def generate_configs(
             })
 
     return configs
+
+
+# ---------------------------------------------------------------------------
+# 网格铺单配置生成器
+# ---------------------------------------------------------------------------
+
+
+def _floor_to_precision(value: Decimal, precision: str) -> Decimal:
+    """将 value 按 precision 字符串向下取整（复用 tick_size/step_size 精度逻辑）"""
+    tick = Decimal(precision).normalize()
+    return (value // tick) * tick
+
+
+class ConfigGenerator:
+    """网格铺单配置生成器
+
+    Args:
+        symbol:       交易对，如 "BTCUSDT"
+        price_low:    网格价格区间下限
+        price_high:   网格价格区间上限
+        grid_count:   网格档位数量（至少 2）
+        total_budget: 总预算（计价货币，如 USDT）
+        tick_size:    价格精度字符串，如 "0.01000000"
+        step_size:    数量精度字符串，如 "0.00001000"
+        grid_mode:    网格模式，'arithmetic'（等差）或 'geometric'（等比），默认等差
+    """
+
+    def __init__(
+        self,
+        symbol: str,
+        price_low: float | str,
+        price_high: float | str,
+        grid_count: int,
+        total_budget: float | str,
+        tick_size: str,
+        step_size: str,
+        grid_mode: str = "arithmetic",
+    ) -> None:
+        if grid_count < 2:
+            raise ValueError("grid_count 至少为 2")
+        if grid_mode not in ("arithmetic", "geometric"):
+            raise ValueError("grid_mode 必须为 'arithmetic' 或 'geometric'")
+
+        self.symbol = symbol
+        self.price_low = Decimal(str(price_low))
+        self.price_high = Decimal(str(price_high))
+        self.grid_count = grid_count
+        self.total_budget = Decimal(str(total_budget))
+        self.tick_size = tick_size
+        self.step_size = step_size
+        self.grid_mode = grid_mode
+
+        if self.price_low >= self.price_high:
+            raise ValueError("price_low 必须小于 price_high")
+
+    def generate_grid_prices(self) -> List[Decimal]:
+        """在 [price_low, price_high] 区间生成 grid_count 个价格档位
+
+        等差模式：价格均匀分布；等比模式：价格按等比数列分布。
+        结果按 tick_size 精度截断（向下取整）。
+
+        Returns:
+            长度为 grid_count 的 Decimal 价格列表，从低到高排列
+        """
+        n = self.grid_count
+        low, high = self.price_low, self.price_high
+        prices: List[Decimal] = []
+
+        if self.grid_mode == "arithmetic":
+            step = (high - low) / (n - 1)
+            for i in range(n):
+                prices.append(_floor_to_precision(low + step * i, self.tick_size))
+        else:
+            # 等比：ratio = (high/low) ^ (1/(n-1))
+            ratio = (high / low) ** (Decimal(1) / Decimal(n - 1))
+            for i in range(n):
+                prices.append(_floor_to_precision(low * (ratio ** i), self.tick_size))
+
+        return prices
+
+    def calc_order_qty(self, price: Decimal, budget_per_grid: Decimal) -> Decimal:
+        """根据每格预算和价格计算下单数量，按 step_size 精度向下取整
+
+        Args:
+            price:           该档位价格
+            budget_per_grid: 每格分配预算
+
+        Returns:
+            按 step_size 精度向下取整的下单数量
+        """
+        if price <= Decimal(0):
+            raise ValueError("价格必须大于 0")
+        return _floor_to_precision(budget_per_grid / price, self.step_size)
+
+    def generate_config(self) -> List[dict]:
+        """生成完整铺单配置，预算平均分配到每个网格档位
+
+        Returns:
+            List[dict]，每个元素包含 price、qty、side、order_type
+        """
+        prices = self.generate_grid_prices()
+        budget_per_grid = self.total_budget / self.grid_count
+        return [
+            {
+                "price": str(price),
+                "qty": str(self.calc_order_qty(price, budget_per_grid)),
+                "side": "BUY",
+                "order_type": "LIMIT",
+            }
+            for price in prices
+        ]
+
+    def export_json(self, filepath: str) -> None:
+        """将配置序列化写入 JSON 文件
+
+        Args:
+            filepath: 目标文件路径
+        """
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "symbol": self.symbol,
+                    "grid_mode": self.grid_mode,
+                    "orders": self.generate_config(),
+                },
+                f,
+                ensure_ascii=False,
+                indent=2,
+            )
