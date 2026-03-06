@@ -11,19 +11,9 @@ from decimal import Decimal, ROUND_DOWN
 from typing import List
 
 
-# 各档位 trust_num 分配比例（共 6 档）
-TRUST_NUM_RATIOS = {1: 0.05, 2: 0.10, 3: 0.20, 4: 0.25, 5: 0.25, 6: 0.15}
-
 # 各档位对应价格区间宽度（单位：tickSize 倍数）
+# dom 7+ 若不在此表中则取默认值 200
 TICK_WIDTHS = {1: 2, 2: 10, 3: 20, 4: 80, 5: 150, 6: 200}
-
-# change_survival_time 配置
-SURVIVAL_TIME = {1: "3-10", 2: "10-30", 3: "10-30", 4: "10-30", 5: "10-30", 6: "10-30"}
-
-# 区间分类：近盘 / 中盘 / 远盘
-ZONE_NEAR = {1}
-ZONE_MID = {2, 3}
-ZONE_FAR = {4, 5, 6}
 
 # 盘口深度累计档位对应关系（用于取 number_float）
 # 近盘取前 2 档累计，中盘取前 8 档，远盘取前 20 档
@@ -33,11 +23,47 @@ DEPTH_LEVELS = {
     "far": 20,
 }
 
+# 各区间 trust_num 相对平均值的倍率
+# trust_num_per_level = round(total_trust / levels × multiplier)
+_ZONE_TRUST_MULTIPLIERS = {
+    "near": Decimal("0.4"),
+    "mid":  Decimal("0.8"),
+    "far":  Decimal("1.2"),
+}
+
+
+def _compute_zones(levels: int) -> tuple:
+    """
+    根据档位总数动态划分近/中/远盘集合
+
+    规则（与单元测试兼容）：
+      levels ≤ 6：近盘 {1}，远盘从第 4 档开始，中盘居中
+      levels > 6：近盘 {1, 2}，远盘为最后 2 档，中盘居中
+
+    :return: (near_set, mid_set, far_set)
+    """
+    if levels <= 3:
+        near = frozenset({1})
+        far = frozenset({levels})
+        mid = frozenset(range(2, levels))
+    elif levels <= 6:
+        # 保持与原 6 档行为一致：dom 1 = 近盘，dom 2-3 = 中盘，dom 4+ = 远盘
+        near = frozenset({1})
+        mid = frozenset(range(2, 4))
+        far = frozenset(range(4, levels + 1))
+    else:
+        # 档位数较多：前 2 档近盘，后 2 档远盘，其余中盘
+        near = frozenset({1, 2})
+        far = frozenset({levels - 1, levels})
+        mid = frozenset(range(3, levels - 1))
+    return near, mid, far
+
 
 def _get_zone(dom: int) -> str:
-    if dom in ZONE_NEAR:
+    """仅用于 6 档默认行为（单元测试向后兼容）"""
+    if dom == 1:
         return "near"
-    if dom in ZONE_MID:
+    if dom in (2, 3):
         return "mid"
     return "far"
 
@@ -158,6 +184,19 @@ def generate_configs(
 
     total_trust = 1000  # 总笔数上限
 
+    # 动态计算各档所属区间（near/mid/far）
+    near_zone, mid_zone, far_zone = _compute_zones(levels)
+
+    def _zone_of(dom: int) -> str:
+        if dom in near_zone:
+            return "near"
+        if dom in mid_zone:
+            return "mid"
+        return "far"
+
+    # 每档 trust_num = round(total_trust / levels × 区间倍率)
+    base_trust = Decimal(total_trust) / Decimal(levels)
+
     configs = []
 
     for direction in [-1, 1]:  # -1=卖, 1=买
@@ -169,9 +208,9 @@ def generate_configs(
             zone_number_float[zone] = _calc_number_float(order_book, zone, step_size)
 
         for dom in range(1, levels + 1):
-            zone = _get_zone(dom)
-            ratio = TRUST_NUM_RATIOS.get(dom, 0.10)
-            trust_num = max(1, math.floor(total_trust * ratio))
+            zone = _zone_of(dom)
+            # trust_num 按区间倍率分配，四舍五入
+            trust_num = max(1, int(base_trust * _ZONE_TRUST_MULTIPLIERS[zone] + Decimal("0.5")))
 
             low_pct, high_pct = price_ranges[dom - 1]
             # price_float 存储百分比字符串，保留两位小数，如 '98.50-100.00'
@@ -184,9 +223,10 @@ def generate_configs(
             number_float = zone_number_float[zone]
             change_number_float = number_float
 
-            change_trust_num = 0 if dom in ZONE_NEAR else 1
-            # 超出预定义范围的 dom 使用最后一档的存活时间，与 TICK_WIDTHS 的 .get() 保持一致
-            change_survival_time = SURVIVAL_TIME.get(dom, SURVIVAL_TIME[max(SURVIVAL_TIME)])
+            # 近盘不变幻委托，中远盘开启
+            change_trust_num = 0 if dom in near_zone else 1
+            # 近盘存活时间短，中远盘长
+            change_survival_time = "3-10" if dom in near_zone else "10-30"
 
             configs.append({
                 "box_id": None,
