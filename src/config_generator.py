@@ -103,17 +103,33 @@ def _build_price_ranges(
     direction: int,
 ) -> list:
     """
-    生成各档位价格区间列表
+    生成各档位价格区间列表（基于百分比区间）
+
+    买方：总区间为当前价的 50%，从当前价向下延伸（50%~100%）
+    卖方：总区间为当前价的 50%，从当前价向上延伸（100%~150%）
+    各档位宽度按 TICK_WIDTHS 权重比例分配，并按 tick_size 向下取整。
+
     :param direction: 1=买（向下延伸），-1=卖（向上延伸）
     :return: [(price_low, price_high), ...] 按 dom 1..levels 顺序
     """
     price = Decimal(str(current_price))
+
+    # 总价格区间宽度 = 当前价的 50%（买卖两侧对称）
+    total_range = price * Decimal("0.5")
+
+    # 各档位 TICK_WIDTHS 权重之和
+    total_ticks = sum(TICK_WIDTHS.get(dom, 200) for dom in range(1, levels + 1))
+
     ranges = []
     cursor = price  # 当前起始边界
 
     for dom in range(1, levels + 1):
         width_ticks = TICK_WIDTHS.get(dom, 200)
-        width = tick_size * width_ticks
+        # 按 TICK_WIDTHS 比例分配总区间，向下对齐到 tick_size 精度
+        raw_width = total_range * Decimal(width_ticks) / Decimal(total_ticks)
+        width = (raw_width // tick_size) * tick_size
+        # 至少保留一个 tick_size，避免 low == high
+        width = width.max(tick_size)
 
         if direction == -1:
             # 卖方：价格从当前价向上延伸
@@ -124,8 +140,7 @@ def _build_price_ranges(
         else:
             # 买方：价格从当前价向下延伸
             high = cursor
-            low = cursor - width
-            low = low.max(Decimal("0"))  # 价格不能为负
+            low = (cursor - width).max(Decimal("0"))  # 价格不能为负
             ranges.append((low, high))
             cursor = low
 

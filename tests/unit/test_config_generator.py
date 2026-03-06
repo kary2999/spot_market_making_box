@@ -514,6 +514,58 @@ class TestBuildPriceRanges:
         for i in range(1, len(ranges)):
             assert ranges[i][1] == ranges[i - 1][0]
 
+    def test_buy_starts_at_current_price(self):
+        """买方第一档的上界 = 当前价"""
+        ranges = _build_price_ranges(10000.0, Decimal("0.01"), 6, 1)
+        assert ranges[0][1] == Decimal("10000")
+
+    def test_sell_starts_at_current_price(self):
+        """卖方第一档的下界 = 当前价"""
+        ranges = _build_price_ranges(10000.0, Decimal("0.01"), 6, -1)
+        assert ranges[0][0] == Decimal("10000")
+
+    def test_buy_total_range_approx_50_percent(self):
+        """买方 6 档累计宽度约等于当前价的 50%（允许 tick 舍入误差）"""
+        price = 10000.0
+        tick = Decimal("0.01")
+        ranges = _build_price_ranges(price, tick, 6, 1)
+        total_width = sum(hi - lo for lo, hi in ranges)
+        expected = Decimal(str(price)) * Decimal("0.5")
+        # 允许不超过 6 个 tick_size 的累计舍入误差
+        assert abs(total_width - expected) <= tick * 6
+
+    def test_sell_total_range_approx_50_percent(self):
+        """卖方 6 档累计宽度约等于当前价的 50%（允许 tick 舍入误差）"""
+        price = 10000.0
+        tick = Decimal("0.01")
+        ranges = _build_price_ranges(price, tick, 6, -1)
+        total_width = sum(hi - lo for lo, hi in ranges)
+        expected = Decimal(str(price)) * Decimal("0.5")
+        assert abs(total_width - expected) <= tick * 6
+
+    def test_buy_outermost_low_near_50_percent(self):
+        """买方最末档的下界约为当前价的 50%（5000 附近）"""
+        price = 10000.0
+        tick = Decimal("0.01")
+        ranges = _build_price_ranges(price, tick, 6, 1)
+        outermost_low = ranges[-1][0]
+        expected_low = Decimal(str(price)) * Decimal("0.5")
+        assert abs(outermost_low - expected_low) <= tick * 6
+
+    def test_sell_outermost_high_near_150_percent(self):
+        """卖方最末档的上界约为当前价的 150%（15000 附近）"""
+        price = 10000.0
+        tick = Decimal("0.01")
+        ranges = _build_price_ranges(price, tick, 6, -1)
+        outermost_high = ranges[-1][1]
+        expected_high = Decimal(str(price)) * Decimal("1.5")
+        assert abs(outermost_high - expected_high) <= tick * 6
+
+    def test_buy_each_range_low_lt_high(self):
+        """买方每档 low < high（宽度 >= 1 tick）"""
+        for lo, hi in _build_price_ranges(10000.0, Decimal("0.01"), 6, 1):
+            assert hi > lo
+
 
 # ---------------------------------------------------------------------------
 # generate_configs
