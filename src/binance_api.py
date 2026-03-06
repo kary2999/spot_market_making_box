@@ -40,19 +40,16 @@ def get_price(symbol: str) -> float:
     return float(data["price"])
 
 
-def get_exchange_info(symbol: str) -> dict:
-    """获取指定交易对的 tickSize、stepSize、minQty 精度信息
+def get_tick_size(symbol: str) -> str:
+    """获取指定交易对的 tickSize（价格精度）
+
+    优先从 PRICE_FILTER 取 tickSize，若无则回退到 LOT_SIZE 的 stepSize。
 
     Args:
         symbol: 交易对，支持 'btc_usdt' 或 'BTCUSDT' 格式
 
     Returns:
-        dict，包含：
-            - tickSize (str): 最小价格变动单位，如 '0.01000000'
-            - stepSize (str): 最小数量变动单位，如 '0.00001000'
-            - minQty (str): 最小下单数量，如 '0.00001000'
-            - price_precision (int): 价格小数位数
-            - qty_precision (int): 数量小数位数
+        tickSize 字符串，如 '0.01'
     """
     data = _get("/api/v3/exchangeInfo", params={"symbol": normalize_symbol(symbol)})
     symbols = data.get("symbols", [])
@@ -61,28 +58,49 @@ def get_exchange_info(symbol: str) -> dict:
 
     filters = {f["filterType"]: f for f in symbols[0].get("filters", [])}
 
-    if "PRICE_FILTER" not in filters:
-        raise ValueError(f"未找到 PRICE_FILTER 信息: {symbol}")
+    if "PRICE_FILTER" in filters:
+        return filters["PRICE_FILTER"]["tickSize"]
+    if "LOT_SIZE" in filters:
+        return filters["LOT_SIZE"]["stepSize"]
+    raise ValueError(f"未找到 tickSize 信息: {symbol}")
+
+
+def get_exchange_info(symbol: str) -> dict:
+    """获取指定交易对的 tickSize、stepSize 精度信息
+
+    当无 PRICE_FILTER 时，tickSize 回退为 LOT_SIZE 的 stepSize。
+
+    Args:
+        symbol: 交易对，支持 'btc_usdt' 或 'BTCUSDT' 格式
+
+    Returns:
+        dict，包含：
+            - tickSize (str): 最小价格变动单位
+            - stepSize (str): 最小数量变动单位
+    """
+    data = _get("/api/v3/exchangeInfo", params={"symbol": normalize_symbol(symbol)})
+    symbols = data.get("symbols", [])
+    if not symbols:
+        raise ValueError(f"未找到交易对信息: {symbol}")
+
+    filters = {f["filterType"]: f for f in symbols[0].get("filters", [])}
+
+    # 优先从 PRICE_FILTER 取 tickSize，回退到 LOT_SIZE stepSize
+    if "PRICE_FILTER" in filters:
+        tick_size = filters["PRICE_FILTER"]["tickSize"]
+    elif "LOT_SIZE" in filters:
+        tick_size = filters["LOT_SIZE"]["stepSize"]
+    else:
+        raise ValueError(f"未找到 tickSize/stepSize 信息: {symbol}")
+
     if "LOT_SIZE" not in filters:
-        raise ValueError(f"未找到 LOT_SIZE 信息: {symbol}")
+        raise ValueError(f"未找到 tickSize/stepSize 信息: {symbol}")
 
-    tick_size = filters["PRICE_FILTER"]["tickSize"]
     step_size = filters["LOT_SIZE"]["stepSize"]
-    min_qty = filters["LOT_SIZE"]["minQty"]
-
-    def _decimal_places(value: str) -> int:
-        """计算有效小数位数，例如 '0.01000000' -> 2"""
-        value = value.rstrip("0")
-        if "." in value:
-            return len(value.split(".")[1])
-        return 0
 
     return {
         "tickSize": tick_size,
         "stepSize": step_size,
-        "minQty": min_qty,
-        "price_precision": _decimal_places(tick_size),
-        "qty_precision": _decimal_places(step_size),
     }
 
 
@@ -104,19 +122,12 @@ def get_order_book(symbol: str, limit: int = 20) -> dict:
     """
     data = _get("/api/v3/depth", params={"symbol": normalize_symbol(symbol), "limit": limit})
 
-    bids = [[float(p), float(q)] for p, q in data["bids"]]
-    asks = [[float(p), float(q)] for p, q in data["asks"]]
-
-    if not bids or not asks:
-        raise RuntimeError(f"盘口数据为空: {symbol}")
+    bids = data["bids"]
+    asks = data["asks"]
 
     return {
         "bids": bids,
         "asks": asks,
-        "best_bid": bids[0][0],
-        "best_ask": asks[0][0],
-        "bid_total_qty": sum(q for _, q in bids),
-        "ask_total_qty": sum(q for _, q in asks),
     }
 
 
