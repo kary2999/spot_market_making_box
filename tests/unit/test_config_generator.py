@@ -515,56 +515,53 @@ class TestBuildPriceRanges:
             assert ranges[i][1] == ranges[i - 1][0]
 
     def test_buy_starts_at_current_price(self):
-        """买方第一档的上界 = 当前价"""
+        """买方第一档的上界 = 100%（当前价对应基准 100%）"""
         ranges = _build_price_ranges(10000.0, Decimal("0.01"), 6, 1)
-        assert ranges[0][1] == Decimal("10000")
+        assert ranges[0][1] == Decimal("100")
 
     def test_sell_starts_at_current_price(self):
-        """卖方第一档的下界 = 当前价"""
+        """卖方第一档的下界 = 100%（当前价对应基准 100%）"""
         ranges = _build_price_ranges(10000.0, Decimal("0.01"), 6, -1)
-        assert ranges[0][0] == Decimal("10000")
+        assert ranges[0][0] == Decimal("100")
 
     def test_buy_total_range_approx_50_percent(self):
-        """买方 6 档累计宽度约等于当前价的 50%（允许 tick 舍入误差）"""
-        price = 10000.0
-        tick = Decimal("0.01")
-        ranges = _build_price_ranges(price, tick, 6, 1)
+        """买方 6 档累计宽度约等于 50（50% 区间）"""
+        ranges = _build_price_ranges(10000.0, Decimal("0.01"), 6, 1)
         total_width = sum(hi - lo for lo, hi in ranges)
-        expected = Decimal(str(price)) * Decimal("0.5")
-        # 允许不超过 6 个 tick_size 的累计舍入误差
-        assert abs(total_width - expected) <= tick * 6
+        assert abs(total_width - Decimal("50")) < Decimal("1")
 
     def test_sell_total_range_approx_50_percent(self):
-        """卖方 6 档累计宽度约等于当前价的 50%（允许 tick 舍入误差）"""
-        price = 10000.0
-        tick = Decimal("0.01")
-        ranges = _build_price_ranges(price, tick, 6, -1)
+        """卖方 6 档累计宽度约等于 50（50% 区间）"""
+        ranges = _build_price_ranges(10000.0, Decimal("0.01"), 6, -1)
         total_width = sum(hi - lo for lo, hi in ranges)
-        expected = Decimal(str(price)) * Decimal("0.5")
-        assert abs(total_width - expected) <= tick * 6
+        assert abs(total_width - Decimal("50")) < Decimal("1")
 
     def test_buy_outermost_low_near_50_percent(self):
-        """买方最末档的下界约为当前价的 50%（5000 附近）"""
-        price = 10000.0
-        tick = Decimal("0.01")
-        ranges = _build_price_ranges(price, tick, 6, 1)
+        """买方最末档的下界约为 50（即 50%）"""
+        ranges = _build_price_ranges(10000.0, Decimal("0.01"), 6, 1)
         outermost_low = ranges[-1][0]
-        expected_low = Decimal(str(price)) * Decimal("0.5")
-        assert abs(outermost_low - expected_low) <= tick * 6
+        assert abs(outermost_low - Decimal("50")) < Decimal("1")
 
     def test_sell_outermost_high_near_150_percent(self):
-        """卖方最末档的上界约为当前价的 150%（15000 附近）"""
-        price = 10000.0
-        tick = Decimal("0.01")
-        ranges = _build_price_ranges(price, tick, 6, -1)
+        """卖方最末档的上界约为 150（即 150%）"""
+        ranges = _build_price_ranges(10000.0, Decimal("0.01"), 6, -1)
         outermost_high = ranges[-1][1]
-        expected_high = Decimal(str(price)) * Decimal("1.5")
-        assert abs(outermost_high - expected_high) <= tick * 6
+        assert abs(outermost_high - Decimal("150")) < Decimal("1")
 
     def test_buy_each_range_low_lt_high(self):
         """买方每档 low < high（宽度 >= 1 tick）"""
         for lo, hi in _build_price_ranges(10000.0, Decimal("0.01"), 6, 1):
             assert hi > lo
+
+    def test_buy_all_high_le_100(self):
+        """买方各档 high ≤ 100（不超过 100% 基准）"""
+        for _, hi in _build_price_ranges(10000.0, Decimal("0.01"), 6, 1):
+            assert hi <= Decimal("100")
+
+    def test_sell_all_low_ge_100(self):
+        """卖方各档 low ≥ 100（不低于 100% 基准）"""
+        for lo, _ in _build_price_ranges(10000.0, Decimal("0.01"), 6, -1):
+            assert lo >= Decimal("100")
 
 
 # ---------------------------------------------------------------------------
@@ -633,6 +630,22 @@ class TestGenerateConfigs:
     def test_price_float_contains_dash(self):
         for c in self._call():
             assert "-" in c["price_float"]
+
+    def test_buy_price_float_max_le_100(self):
+        """买方 price_float 最大值（high）≤ 100"""
+        for c in self._call():
+            if c["direction"] == 1:
+                _, high_s = c["price_float"].split("-")
+                assert Decimal(high_s) <= Decimal("100"), \
+                    f"dom{c['dom']} buy high={high_s} > 100"
+
+    def test_sell_price_float_min_ge_100(self):
+        """卖方 price_float 最小值（low）≥ 100"""
+        for c in self._call():
+            if c["direction"] == -1:
+                low_s, _ = c["price_float"].split("-")
+                assert Decimal(low_s) >= Decimal("100"), \
+                    f"dom{c['dom']} sell low={low_s} < 100"
 
     def test_direction_labels_in_internal_field(self):
         labels = {c["_direction_label"] for c in self._call()}

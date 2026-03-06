@@ -200,27 +200,30 @@ class TestBuildPriceRanges:
             assert low_cur == high_next, f"dom{i+1} low != dom{i+2} high"
 
     def test_sell_dom1_starts_at_market_price(self):
-        """卖方 dom1 起始价 = 市场价"""
+        """卖方 dom1 起始百分比 = 100（当前价对应 100%）"""
         tick = self._tick("0.01")
         ranges = _build_price_ranges(95000.0, tick, 6, direction=-1)
         low, _ = ranges[0]
-        assert low == Decimal("95000.00")
+        assert low == Decimal("100")
 
     def test_buy_dom1_ends_at_market_price(self):
-        """买方 dom1 结束价 = 市场价"""
+        """买方 dom1 结束百分比 = 100（当前价对应 100%）"""
         tick = self._tick("0.01")
         ranges = _build_price_ranges(95000.0, tick, 6, direction=1)
         _, high = ranges[0]
-        assert high == Decimal("95000.00")
+        assert high == Decimal("100")
 
-    def test_price_precision_aligned_to_tick(self):
-        """所有价格均与 tickSize 精度对齐"""
+    def test_buy_all_high_le_100(self):
+        """买方各档 high ≤ 100（不超过 100% 基准）"""
         tick = self._tick("0.01")
-        ranges = _build_price_ranges(95000.12, tick, 6, direction=-1)
-        for low, high in ranges:
-            # 两位小数精度：乘以100后为整数
-            assert (low * 100) % 1 == 0, f"low={low} not aligned to tick=0.01"
-            assert (high * 100) % 1 == 0, f"high={high} not aligned to tick=0.01"
+        for _, high in _build_price_ranges(95000.12, tick, 6, direction=1):
+            assert high <= Decimal("100"), f"buy high={high} > 100"
+
+    def test_sell_all_low_ge_100(self):
+        """卖方各档 low ≥ 100（不低于 100% 基准）"""
+        tick = self._tick("0.01")
+        for low, _ in _build_price_ranges(95000.12, tick, 6, direction=-1):
+            assert low >= Decimal("100"), f"sell low={low} < 100"
 
     def test_buy_price_never_negative(self):
         """买方区间价格不能为负数"""
@@ -363,6 +366,24 @@ class TestGenerateConfigs:
             low_s, high_s = pf.split("-")
             assert Decimal(low_s) < Decimal(high_s), f"price_float '{pf}': low >= high"
 
+    def test_buy_price_float_max_le_100(self, btc_exchange_info, btc_depth):
+        """买方 price_float 最大值（high）≤ 100"""
+        configs = self._run(btc_exchange_info, btc_depth)
+        for c in configs:
+            if c["direction"] == 1:
+                _, high_s = c["price_float"].split("-")
+                assert Decimal(high_s) <= Decimal("100"), \
+                    f"dom{c['dom']} buy high={high_s} > 100"
+
+    def test_sell_price_float_min_ge_100(self, btc_exchange_info, btc_depth):
+        """卖方 price_float 最小值（low）≥ 100"""
+        configs = self._run(btc_exchange_info, btc_depth)
+        for c in configs:
+            if c["direction"] == -1:
+                low_s, _ = c["price_float"].split("-")
+                assert Decimal(low_s) >= Decimal("100"), \
+                    f"dom{c['dom']} sell low={low_s} < 100"
+
     def test_number_float_equals_change_number_float(self, btc_exchange_info, btc_depth):
         """number_float 与 change_number_float 保持一致"""
         configs = self._run(btc_exchange_info, btc_depth)
@@ -387,18 +408,18 @@ class TestGenerateConfigs:
             assert c["pid"] == 7
 
     def test_shib_tiny_price(self, shib_exchange_info, shib_depth):
-        """极小价格（SHIB）：精度对齐验证"""
+        """极小价格（SHIB）：price_float 为百分比格式，买方 high ≤ 100，卖方 low ≥ 100"""
         configs = self._run(shib_exchange_info, shib_depth,
                             symbol="shib_usdt", current_price=0.000025)
-        tick_size = Decimal(shib_exchange_info["tickSize"])
-        places = len(str(tick_size).rstrip("0").split(".")[-1]) if "." in str(tick_size) else 0
         for c in configs:
             low_s, high_s = c["price_float"].split("-")
-            # 验证小数位不超过 tick 精度
-            for s in (low_s, high_s):
-                if "." in s:
-                    actual_places = len(s.split(".")[1].rstrip("0") or "0")
-                    assert actual_places <= places + 1  # 允许尾零
+            assert Decimal(low_s) < Decimal(high_s)
+            if c["direction"] == 1:
+                assert Decimal(high_s) <= Decimal("100"), \
+                    f"SHIB buy dom{c['dom']} high={high_s} > 100"
+            else:
+                assert Decimal(low_s) >= Decimal("100"), \
+                    f"SHIB sell dom{c['dom']} low={low_s} < 100"
 
     def test_eth_price_ranges_continuous(self, eth_exchange_info, eth_depth):
         """ETH 买方档位价格区间连续不重叠：dom_i.low == dom_{i+1}.high"""
