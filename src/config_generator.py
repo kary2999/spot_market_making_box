@@ -182,6 +182,10 @@ def _build_price_ranges(
     mid_per_dom = mid_pct_total / Decimal(mid_count) if mid_count > 0 else Decimal(0)
     far_per_dom = far_pct_total / Decimal(far_count) if far_count > 0 else Decimal(0)
 
+    # 买盘最远边界恰好为 50%，卖盘最远边界恰好为 150%
+    BUY_OUTER_BOUND = Decimal("50")
+    SELL_OUTER_BOUND = Decimal("150")
+
     ranges = []
     cursor_pct = Decimal("100")
 
@@ -193,16 +197,18 @@ def _build_price_ranges(
         else:
             width_pct = far_per_dom
 
+        is_last = (dom == levels)
+
         if direction == -1:
             # 卖方：从 100% 向上延伸
             low_pct = cursor_pct
-            high_pct = cursor_pct + width_pct
+            high_pct = SELL_OUTER_BOUND if is_last else cursor_pct + width_pct
             ranges.append((low_pct, high_pct))
             cursor_pct = high_pct
         else:
             # 买方：从 100% 向下延伸
             high_pct = cursor_pct
-            low_pct = cursor_pct - width_pct
+            low_pct = BUY_OUTER_BOUND if is_last else cursor_pct - width_pct
             ranges.append((low_pct, high_pct))
             cursor_pct = low_pct
 

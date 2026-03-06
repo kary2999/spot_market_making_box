@@ -435,3 +435,53 @@ class TestGenerateConfigs:
             assert low_cur == high_next, (
                 f"dom{i+1} low={low_cur} != dom{i+2} high={high_next}"
             )
+
+    def test_buy_far_zone_reaches_50_percent(self, btc_exchange_info, btc_depth):
+        """买方最末档 price_float 下界精确为 '50.000'（远盘达到 50%）"""
+        configs = self._run(btc_exchange_info, btc_depth)
+        buy_configs = sorted(
+            [c for c in configs if c["direction"] == 1],
+            key=lambda x: x["dom"],
+        )
+        last_low, _ = buy_configs[-1]["price_float"].split("-")
+        from decimal import Decimal
+        assert Decimal(last_low) == Decimal("50"), \
+            f"买方最末档 low={last_low}，期望 50.000"
+
+    def test_sell_far_zone_reaches_150_percent(self, btc_exchange_info, btc_depth):
+        """卖方最末档 price_float 上界精确为 '150.000'（远盘达到 150%）"""
+        configs = self._run(btc_exchange_info, btc_depth)
+        sell_configs = sorted(
+            [c for c in configs if c["direction"] == -1],
+            key=lambda x: x["dom"],
+        )
+        _, last_high = sell_configs[-1]["price_float"].split("-")
+        from decimal import Decimal
+        assert Decimal(last_high) == Decimal("150"), \
+            f"卖方最末档 high={last_high}，期望 150.000"
+
+    def test_buy_far_boundary_9_levels(self, eth_exchange_info, eth_depth):
+        """ETH 9 档：买方最末档下界精确为 50%"""
+        configs = self._run(eth_exchange_info, eth_depth,
+                            symbol="eth_usdt", current_price=2500.0, levels=9)
+        buy_configs = sorted(
+            [c for c in configs if c["direction"] == 1],
+            key=lambda x: x["dom"],
+        )
+        last_low, _ = buy_configs[-1]["price_float"].split("-")
+        from decimal import Decimal
+        assert Decimal(last_low) == Decimal("50"), \
+            f"ETH 9档 买方最末档 low={last_low}，期望 50.000"
+
+    def test_sell_far_boundary_9_levels(self, eth_exchange_info, eth_depth):
+        """ETH 9 档：卖方最末档上界精确为 150%"""
+        configs = self._run(eth_exchange_info, eth_depth,
+                            symbol="eth_usdt", current_price=2500.0, levels=9)
+        sell_configs = sorted(
+            [c for c in configs if c["direction"] == -1],
+            key=lambda x: x["dom"],
+        )
+        _, last_high = sell_configs[-1]["price_float"].split("-")
+        from decimal import Decimal
+        assert Decimal(last_high) == Decimal("150"), \
+            f"ETH 9档 卖方最末档 high={last_high}，期望 150.000"

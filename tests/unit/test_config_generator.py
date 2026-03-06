@@ -536,17 +536,37 @@ class TestBuildPriceRanges:
         total_width = sum(hi - lo for lo, hi in ranges)
         assert abs(total_width - Decimal("50")) < Decimal("1")
 
-    def test_buy_outermost_low_near_50_percent(self):
-        """买方最末档的下界约为 50（即 50%）"""
+    def test_buy_outermost_low_exactly_50_percent(self):
+        """买方最末档下界精确为 50%（远盘买盘最低到达 50%）"""
         ranges = _build_price_ranges(10000.0, Decimal("0.01"), 6, 1)
         outermost_low = ranges[-1][0]
-        assert abs(outermost_low - Decimal("50")) < Decimal("1")
+        assert outermost_low == Decimal("50")
 
-    def test_sell_outermost_high_near_150_percent(self):
-        """卖方最末档的上界约为 150（即 150%）"""
+    def test_sell_outermost_high_exactly_150_percent(self):
+        """卖方最末档上界精确为 150%（远盘卖盘最高到达 150%）"""
         ranges = _build_price_ranges(10000.0, Decimal("0.01"), 6, -1)
         outermost_high = ranges[-1][1]
-        assert abs(outermost_high - Decimal("150")) < Decimal("1")
+        assert outermost_high == Decimal("150")
+
+    def test_buy_far_boundary_exact_9_levels(self):
+        """9 档买方：最末档下界精确为 50%"""
+        ranges = _build_price_ranges(2500.0, Decimal("0.01"), 9, 1)
+        assert ranges[-1][0] == Decimal("50")
+
+    def test_sell_far_boundary_exact_9_levels(self):
+        """9 档卖方：最末档上界精确为 150%"""
+        ranges = _build_price_ranges(2500.0, Decimal("0.01"), 9, -1)
+        assert ranges[-1][1] == Decimal("150")
+
+    def test_buy_far_boundary_exact_shib(self):
+        """极小价格（SHIB 级别）买方：最末档下界精确为 50%"""
+        ranges = _build_price_ranges(0.000025, Decimal("0.00000001"), 6, 1)
+        assert ranges[-1][0] == Decimal("50")
+
+    def test_sell_far_boundary_exact_shib(self):
+        """极小价格（SHIB 级别）卖方：最末档上界精确为 150%"""
+        ranges = _build_price_ranges(0.000025, Decimal("0.00000001"), 6, -1)
+        assert ranges[-1][1] == Decimal("150")
 
     def test_buy_each_range_low_lt_high(self):
         """买方每档 low < high（宽度 >= 1 tick）"""

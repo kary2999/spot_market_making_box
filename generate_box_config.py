@@ -150,7 +150,7 @@ def main() -> None:
         record_count=len(configs),
     )
     _print_table(configs, levels)
-    print_summary(configs)
+    print_summary(configs, reference_price=current_price)
 
     # ── 4. 生成 SQL 文件 ─────────────────────────────────────────────────────
     safe_symbol = symbol.replace("/", "_")
