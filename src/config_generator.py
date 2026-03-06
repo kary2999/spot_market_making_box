@@ -103,46 +103,39 @@ def _build_price_ranges(
     direction: int,
 ) -> list:
     """
-    生成各档位价格区间列表（基于百分比区间）
+    生成各档位价格百分比区间列表
 
-    买方：总区间为当前价的 50%，从当前价向下延伸（50%~100%）
-    卖方：总区间为当前价的 50%，从当前价向上延伸（100%~150%）
-    各档位宽度按 TICK_WIDTHS 权重比例分配，并按 tick_size 向下取整。
+    买方：总区间 50%，从当前价向下延伸（50%~100%），price_float 如 '98.50-100.00'
+    卖方：总区间 50%，从当前价向上延伸（100%~150%），price_float 如 '100.00-101.50'
+    各档位宽度按 TICK_WIDTHS 权重比例分配。
 
     :param direction: 1=买（向下延伸），-1=卖（向上延伸）
-    :return: [(price_low, price_high), ...] 按 dom 1..levels 顺序
+    :return: [(low_pct, high_pct), ...] 按 dom 1..levels 顺序，Decimal 百分比值
     """
-    price = Decimal(str(current_price))
-
-    # 总价格区间宽度 = 当前价的 50%（买卖两侧对称）
-    total_range = price * Decimal("0.5")
-
     # 各档位 TICK_WIDTHS 权重之和
     total_ticks = sum(TICK_WIDTHS.get(dom, 200) for dom in range(1, levels + 1))
 
     ranges = []
-    cursor = price  # 当前起始边界
+    # 游标以百分比表示，买卖均从 100% 开始
+    cursor_pct = Decimal("100")
 
     for dom in range(1, levels + 1):
         width_ticks = TICK_WIDTHS.get(dom, 200)
-        # 按 TICK_WIDTHS 比例分配总区间，向下对齐到 tick_size 精度
-        raw_width = total_range * Decimal(width_ticks) / Decimal(total_ticks)
-        width = (raw_width // tick_size) * tick_size
-        # 至少保留一个 tick_size，避免 low == high
-        width = width.max(tick_size)
+        # 该档位百分比宽度 = (权重/总权重) × 50%
+        width_pct = Decimal(width_ticks) / Decimal(total_ticks) * Decimal("50")
 
         if direction == -1:
-            # 卖方：价格从当前价向上延伸
-            low = cursor
-            high = cursor + width
-            ranges.append((low, high))
-            cursor = high
+            # 卖方：从 100% 向上延伸
+            low_pct = cursor_pct
+            high_pct = cursor_pct + width_pct
+            ranges.append((low_pct, high_pct))
+            cursor_pct = high_pct
         else:
-            # 买方：价格从当前价向下延伸
-            high = cursor
-            low = (cursor - width).max(Decimal("0"))  # 价格不能为负
-            ranges.append((low, high))
-            cursor = low
+            # 买方：从 100% 向下延伸
+            high_pct = cursor_pct
+            low_pct = (cursor_pct - width_pct).max(Decimal("0"))
+            ranges.append((low_pct, high_pct))
+            cursor_pct = low_pct
 
     return ranges
 
@@ -180,8 +173,13 @@ def generate_configs(
             ratio = TRUST_NUM_RATIOS.get(dom, 0.10)
             trust_num = max(1, math.floor(total_trust * ratio))
 
-            low, high = price_ranges[dom - 1]
-            price_float = f"{_format_price(low, tick_size)}-{_format_price(high, tick_size)}"
+            low_pct, high_pct = price_ranges[dom - 1]
+            # price_float 存储百分比字符串，保留两位小数，如 '98.50-100.00'
+            pct_fmt = Decimal("0.01")
+            price_float = (
+                f"{low_pct.quantize(pct_fmt, rounding=ROUND_DOWN)}"
+                f"-{high_pct.quantize(pct_fmt, rounding=ROUND_DOWN)}"
+            )
 
             number_float = zone_number_float[zone]
             change_number_float = number_float
