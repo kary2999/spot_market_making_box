@@ -11,9 +11,12 @@ from decimal import Decimal, ROUND_DOWN
 from typing import List
 
 
-# 各档位对应价格区间宽度（单位：tickSize 倍数）
-# dom 7+ 若不在此表中则取默认值 200
-TICK_WIDTHS = {1: 2, 2: 10, 3: 20, 4: 80, 5: 150, 6: 200}
+# 各区间 tick 数边界（按距当前价的最小变动单位数量划分）
+# 近盘：0 到 NEAR_TICK_BOUNDARY tick 内（紧靠当前价）
+# 中盘：NEAR_TICK_BOUNDARY 到 MID_TICK_BOUNDARY tick 内
+# 远盘：MID_TICK_BOUNDARY tick 到 50% 价格总范围
+NEAR_TICK_BOUNDARY = 150
+MID_TICK_BOUNDARY = 100_000
 
 # 盘口深度累计档位对应关系（用于取 number_float）
 # 近盘取前 2 档累计，中盘取前 8 档，远盘取前 20 档
@@ -129,26 +132,66 @@ def _build_price_ranges(
     direction: int,
 ) -> list:
     """
-    生成各档位价格百分比区间列表
+    根据 tick 数边界动态计算各档位价格百分比区间
 
-    买方：总区间 50%，从当前价向下延伸（50%~100%），price_float 如 '98.50-100.00'
-    卖方：总区间 50%，从当前价向上延伸（100%~150%），price_float 如 '100.00-101.50'
-    各档位宽度按 TICK_WIDTHS 权重比例分配。
+    区间划分（按距当前价的 tick 数量）：
+      近盘：0 到 NEAR_TICK_BOUNDARY（150）tick
+      中盘：150 到 MID_TICK_BOUNDARY（100,000）tick
+      远盘：100,000 tick 到 50% 价格范围边界
 
-    :param direction: 1=买（向下延伸），-1=卖（向上延伸）
+    买方：从 100% 向下延伸到 50%，price_float 如 '99.928-100.000'
+    卖方：从 100% 向上延伸到 150%，price_float 如 '100.000-100.072'
+
+    :param current_price: 当前市场价格
+    :param tick_size:     价格最小变动单位
+    :param levels:        总档位数
+    :param direction:     1=买（向下），-1=卖（向上）
     :return: [(low_pct, high_pct), ...] 按 dom 1..levels 顺序，Decimal 百分比值
     """
-    # 各档位 TICK_WIDTHS 权重之和
-    total_ticks = sum(TICK_WIDTHS.get(dom, 200) for dom in range(1, levels + 1))
+    price = Decimal(str(current_price))
+    # 50% 价格范围对应的总 tick 数（至少为 1）
+    total_ticks = max(1, int(price * Decimal("0.5") / tick_size))
+
+    # 各区间 tick 边界（不超过总 tick 数）
+    near_end = min(NEAR_TICK_BOUNDARY, total_ticks)
+    mid_end = min(MID_TICK_BOUNDARY, total_ticks)
+
+    near_ticks_raw = near_end
+    mid_ticks_raw = mid_end - near_end
+    far_ticks_raw = total_ticks - mid_end
+
+    # 获取各区间的档位集合
+    near_zone, mid_zone, far_zone = _compute_zones(levels)
+    near_count = len(near_zone)
+    mid_count = len(mid_zone)
+    far_count = len(far_zone)
+
+    # 有效 tick 数：每档至少 1 tick，防止零宽度区间
+    effective_near = max(near_count, near_ticks_raw)
+    effective_mid = max(mid_count, mid_ticks_raw)
+    effective_far = max(far_count, far_ticks_raw)
+    total_effective = Decimal(effective_near + effective_mid + effective_far)
+
+    # 各区间百分比宽度（归一化到总 50% 范围）
+    near_pct_total = Decimal(effective_near) / total_effective * Decimal("50")
+    mid_pct_total = Decimal(effective_mid) / total_effective * Decimal("50")
+    far_pct_total = Decimal(effective_far) / total_effective * Decimal("50")
+
+    # 各档位百分比宽度（区间总宽度平均分配给该区间的档位数）
+    near_per_dom = near_pct_total / Decimal(near_count) if near_count > 0 else Decimal(0)
+    mid_per_dom = mid_pct_total / Decimal(mid_count) if mid_count > 0 else Decimal(0)
+    far_per_dom = far_pct_total / Decimal(far_count) if far_count > 0 else Decimal(0)
 
     ranges = []
-    # 游标以百分比表示，买卖均从 100% 开始
     cursor_pct = Decimal("100")
 
     for dom in range(1, levels + 1):
-        width_ticks = TICK_WIDTHS.get(dom, 200)
-        # 该档位百分比宽度 = (权重/总权重) × 50%
-        width_pct = Decimal(width_ticks) / Decimal(total_ticks) * Decimal("50")
+        if dom in near_zone:
+            width_pct = near_per_dom
+        elif dom in mid_zone:
+            width_pct = mid_per_dom
+        else:
+            width_pct = far_per_dom
 
         if direction == -1:
             # 卖方：从 100% 向上延伸
@@ -159,7 +202,7 @@ def _build_price_ranges(
         else:
             # 买方：从 100% 向下延伸
             high_pct = cursor_pct
-            low_pct = (cursor_pct - width_pct).max(Decimal("0"))
+            low_pct = cursor_pct - width_pct
             ranges.append((low_pct, high_pct))
             cursor_pct = low_pct
 
@@ -213,8 +256,8 @@ def generate_configs(
             trust_num = max(1, int(base_trust * _ZONE_TRUST_MULTIPLIERS[zone] + Decimal("0.5")))
 
             low_pct, high_pct = price_ranges[dom - 1]
-            # price_float 存储百分比字符串，保留两位小数，如 '98.50-100.00'
-            pct_fmt = Decimal("0.01")
+            # price_float 存储百分比字符串，最多 3 位小数，如 '99.928-100.000'
+            pct_fmt = Decimal("0.001")
             price_float = (
                 f"{low_pct.quantize(pct_fmt, rounding=ROUND_DOWN)}"
                 f"-{high_pct.quantize(pct_fmt, rounding=ROUND_DOWN)}"
