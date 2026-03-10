@@ -20,7 +20,7 @@ bcscale(20);
 // ==================== 常量 ====================
 
 define('NEAR_TICK_BOUNDARY', 150);
-define('MID_TICK_BOUNDARY', 100000);
+define('MID_TICK_BOUNDARY', 100000);  // 10万
 
 define('DEPTH_LEVELS', array(
     'near' => 2,
