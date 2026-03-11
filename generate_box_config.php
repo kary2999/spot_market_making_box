@@ -149,6 +149,10 @@ function format_qty($value, $stepSize)
     return bcdiv(bcmul($value, $factor, 0), $factor, $places);
 }
 
+/**
+ * 计算盘口每档平均挂单量（per-level average，不是累计）
+ * 目标：近盘每笔挂单量与 Binance 单档量大体一致
+ */
 function calc_depth_avg_qty($orderBook, $depth)
 {
     $bids = isset($orderBook['bids']) ? $orderBook['bids'] : array();
@@ -156,14 +160,23 @@ function calc_depth_avg_qty($orderBook, $depth)
 
     $bidTotal = '0';
     $askTotal = '0';
+    $bidCount = 0;
+    $askCount = 0;
+
     for ($i = 0; $i < min($depth, count($bids)); $i++) {
         $bidTotal = bcadd($bidTotal, $bids[$i][1]);
+        $bidCount++;
     }
     for ($i = 0; $i < min($depth, count($asks)); $i++) {
         $askTotal = bcadd($askTotal, $asks[$i][1]);
+        $askCount++;
     }
 
-    return bcdiv(bcadd($bidTotal, $askTotal), '2', 10);
+    // 每档平均量
+    $bidAvg = $bidCount > 0 ? bcdiv($bidTotal, (string)$bidCount, 10) : '0';
+    $askAvg = $askCount > 0 ? bcdiv($askTotal, (string)$askCount, 10) : '0';
+
+    return bcdiv(bcadd($bidAvg, $askAvg), '2', 10);
 }
 
 function make_number_float($avgQty, $stepSize)
