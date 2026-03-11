@@ -150,33 +150,52 @@ function format_qty($value, $stepSize)
 }
 
 /**
- * 计算盘口每档平均挂单量（per-level average，不是累计）
- * 目标：近盘每笔挂单量与 Binance 单档量大体一致
+ * 计算盘口挂单量中位数
+ *
+ * 策略：
+ *   1. 收集买卖双侧前 depth 档的单档量
+ *   2. 去掉最大值（异常大单，不作参考）
+ *   3. 取中位数作为基准量
+ *   4. 最小值作为下限（不低于 min）
  */
-function calc_depth_avg_qty($orderBook, $depth)
+function calc_depth_median_qty($orderBook, $depth)
 {
     $bids = isset($orderBook['bids']) ? $orderBook['bids'] : array();
     $asks = isset($orderBook['asks']) ? $orderBook['asks'] : array();
 
-    $bidTotal = '0';
-    $askTotal = '0';
-    $bidCount = 0;
-    $askCount = 0;
-
+    $quantities = array();
     for ($i = 0; $i < min($depth, count($bids)); $i++) {
-        $bidTotal = bcadd($bidTotal, $bids[$i][1]);
-        $bidCount++;
+        $quantities[] = (float)$bids[$i][1];
     }
     for ($i = 0; $i < min($depth, count($asks)); $i++) {
-        $askTotal = bcadd($askTotal, $asks[$i][1]);
-        $askCount++;
+        $quantities[] = (float)$asks[$i][1];
     }
 
-    // 每档平均量
-    $bidAvg = $bidCount > 0 ? bcdiv($bidTotal, (string)$bidCount, 10) : '0';
-    $askAvg = $askCount > 0 ? bcdiv($askTotal, (string)$askCount, 10) : '0';
+    if (empty($quantities)) {
+        return '0';
+    }
 
-    return bcdiv(bcadd($bidAvg, $askAvg), '2', 10);
+    sort($quantities);
+
+    // 去掉最大值（最后一个）
+    if (count($quantities) > 1) {
+        array_pop($quantities);
+    }
+
+    $count = count($quantities);
+    $minQty = $quantities[0];
+
+    // 中位数
+    if ($count % 2 === 0) {
+        $median = ($quantities[$count / 2 - 1] + $quantities[$count / 2]) / 2;
+    } else {
+        $median = $quantities[intdiv($count, 2)];
+    }
+
+    // 以中位数为基准，最小值为下限
+    $base = max($median, $minQty);
+
+    return number_format($base, 1, '.', '');
 }
 
 function make_number_float($avgQty, $stepSize)
@@ -251,10 +270,13 @@ function generate_configs($symbol, $levels, $totalUsdt, $pid, $currentPrice, $lo
     // 买卖各占一半
     $oneSideTrust = (int)floor($totalTrust / 2);
 
-    $nearDepthQty  = calc_depth_avg_qty($orderBook, DEPTH_NEAR);
-    $otherDepthQty = calc_depth_avg_qty($orderBook, DEPTH_OTHER);
-    $nearNumberFloat  = make_number_float($nearDepthQty, $stepSize);
-    $otherNumberFloat = make_number_float($otherDepthQty, $stepSize);
+    // 近盘：前5档中位数（去最大值），接近自然挂单
+    $nearMedianQty  = calc_depth_median_qty($orderBook, DEPTH_NEAR);
+    // 中远盘：前20档中位数
+    $otherMedianQty = calc_depth_median_qty($orderBook, DEPTH_OTHER);
+
+    $nearNumberFloat  = make_number_float($nearMedianQty, $stepSize);
+    $otherNumberFloat = make_number_float($otherMedianQty, $stepSize);
 
     // 近盘 trust_num = tick数 × 填充率（但不超过单侧总量的 30%）
     $nearTrustPerDom = max(1, (int)round(NEAR_TICKS_PER_DOM * NEAR_FILL_RATE));
