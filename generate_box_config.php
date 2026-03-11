@@ -195,13 +195,13 @@ function calc_depth_stats($orderBook, $depth)
 }
 
 /**
- * 生成 number_float 区间
- *   qtyMin = binance 盘口最小量 × ratio（保留自然比例，作为下限）
- *   qtyMax = binance 盘口中位数 × ratio
+ * 生成近盘 number_float（有随机区间，min-max）
+ *   qtyMin = binance 最小量 × ratio
+ *   qtyMax = binance 中位数 × ratio
+ *   约束：nearMax 不能大于 otherMax（由外部传入限制）
  */
-function make_number_float($medianQty, $realMinQty, $stepSize, $ratio = '0.2')
+function make_near_number_float($medianQty, $realMinQty, $stepSize, $ratio, $otherMax)
 {
-    // 对 min 和 median 同比例缩放，保留市场自然分布
     $qtyMin = bcmul($realMinQty, $ratio, 20);
     $qtyMax = bcmul($medianQty, $ratio, 20);
 
@@ -209,6 +209,12 @@ function make_number_float($medianQty, $realMinQty, $stepSize, $ratio = '0.2')
     if (bccomp($qtyMin, $stepSize) < 0) {
         $qtyMin = $stepSize;
     }
+
+    // 近盘 max 不能超过中远盘 max
+    if (bccomp($qtyMax, $otherMax) > 0) {
+        $qtyMax = $otherMax;
+    }
+
     // 上限至少是下限的 1.5 倍
     if (bccomp($qtyMax, bcmul($qtyMin, '1.5', 10)) < 0) {
         $qtyMax = bcmul($qtyMin, '1.5', 10);
@@ -222,6 +228,24 @@ function make_number_float($medianQty, $realMinQty, $stepSize, $ratio = '0.2')
     }
 
     return $qtyMinFmt . '-' . $qtyMaxFmt;
+}
+
+/**
+ * 生成中远盘 number_float（固定量：最大值-最大值）
+ *   量稳定，不随机，确保铺单量足够
+ */
+function make_other_number_float($medianQty, $stepSize, $ratio)
+{
+    $qtyMax = bcmul($medianQty, $ratio, 20);
+
+    if (bccomp($qtyMax, $stepSize) < 0) {
+        $qtyMax = $stepSize;
+    }
+
+    $qtyMaxFmt = format_qty($qtyMax, $stepSize);
+
+    // 固定量：最大值-最大值
+    return $qtyMaxFmt . '-' . $qtyMaxFmt;
 }
 
 // ==================== 核心：价格区间 ====================
@@ -279,13 +303,16 @@ function generate_configs($symbol, $levels, $totalUsdt, $pid, $currentPrice, $lo
     // 买卖各占一半
     $oneSideTrust = (int)floor($totalTrust / 2);
 
-    // 近盘：前5档统计（中位数×0.08，最小量=盘口真实最小）
-    $nearStats  = calc_depth_stats($orderBook, DEPTH_NEAR);
-    // 中远盘：前20档统计（中位数×0.2，最小量=盘口真实最小）
-    $otherStats = calc_depth_stats($orderBook, DEPTH_OTHER);
+    // 中远盘：前20档统计，固定量（最大值-最大值）
+    $otherStats       = calc_depth_stats($orderBook, DEPTH_OTHER);
+    $otherMax         = format_qty(bcmul($otherStats['median'], '0.2', 20), $stepSize);
+    $otherNumberFloat = $otherMax . '-' . $otherMax;
 
-    $nearNumberFloat  = make_number_float($nearStats['median'],  $nearStats['min'],  $stepSize, '0.08');
-    $otherNumberFloat = make_number_float($otherStats['median'], $otherStats['min'], $stepSize, '0.2');
+    // 近盘：前5档统计，随机区间，但 max 不超过中远盘 max
+    $nearStats        = calc_depth_stats($orderBook, DEPTH_NEAR);
+    $nearNumberFloat  = make_near_number_float(
+        $nearStats['median'], $nearStats['min'], $stepSize, '0.08', $otherMax
+    );
 
     // 近盘 trust_num = tick数 × 填充率（但不超过单侧总量的 30%）
     $nearTrustPerDom = max(1, (int)round(NEAR_TICKS_PER_DOM * NEAR_FILL_RATE));
