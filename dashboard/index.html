@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>铺单控制面板</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d1117; color: #c9d1d9; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px; }
+
+  .topbar {
+    background: #161b22;
+    border-bottom: 1px solid #30363d;
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .topbar h1 { font-size: 15px; color: #58a6ff; font-weight: 600; }
+
+  .ai-cost {
+    text-align: right;
+    background: #1c2128;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 6px 12px;
+    min-width: 140px;
+  }
+  .ai-cost .label { font-size: 10px; color: #8b949e; }
+  .ai-cost .value { font-size: 14px; color: #3fb950; font-weight: bold; }
+  .ai-cost .sub   { font-size: 10px; color: #8b949e; }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    padding: 12px;
+  }
+  .stat-card {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 10px;
+    text-align: center;
+  }
+  .stat-card .num  { font-size: 22px; font-weight: bold; color: #58a6ff; }
+  .stat-card .lbl  { font-size: 10px; color: #8b949e; margin-top: 2px; }
+  .stat-card.ok  .num { color: #3fb950; }
+  .stat-card.err .num { color: #f85149; }
+
+  .section-title {
+    padding: 8px 12px 4px;
+    font-size: 11px;
+    color: #8b949e;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    border-top: 1px solid #21262d;
+  }
+
+  .log-table { width: 100%; border-collapse: collapse; }
+  .log-table td { padding: 6px 8px; border-bottom: 1px solid #21262d; vertical-align: top; }
+  .log-table tr:hover td { background: #161b22; }
+
+  .log-wrap { padding: 0 4px 8px; overflow-x: auto; }
+
+  .tag {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: bold;
+    white-space: nowrap;
+  }
+  .tag-api_local   { background: #1f3a5c; color: #58a6ff; }
+  .tag-api_market  { background: #1f3a5c; color: #79c0ff; }
+  .tag-sql_write   { background: #2d1f5c; color: #d2a8ff; }
+  .tag-batch_start { background: #1a3a2a; color: #3fb950; }
+  .tag-batch_end   { background: #1a3a2a; color: #56d364; }
+  .tag-generate    { background: #3a2a1a; color: #e3b341; }
+
+  .status-ok   { color: #3fb950; }
+  .status-fail { color: #f85149; font-weight: bold; }
+
+  .time-col { color: #8b949e; font-size: 11px; white-space: nowrap; }
+  .detail   { color: #c9d1d9; font-size: 11px; word-break: break-all; }
+
+  .pulse { animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  .footer {
+    padding: 10px 12px;
+    color: #484f58;
+    font-size: 10px;
+    border-top: 1px solid #21262d;
+    display: flex;
+    justify-content: space-between;
+  }
+  #live-dot { color: #3fb950; }
+
+  .empty { color: #484f58; text-align: center; padding: 20px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div>
+    <h1>📊 铺单控制面板</h1>
+    <div style="font-size:10px;color:#484f58;margin-top:2px" id="server-time">--</div>
+  </div>
+  <div class="ai-cost">
+    <div class="label">🤖 AI 费用</div>
+    <div class="value" id="ai-cost-val">$0.0000</div>
+    <div class="sub" id="ai-tokens">-- tokens</div>
+    <div class="sub" id="ai-model" style="color:#484f58">--</div>
+  </div>
+</div>
+
+<div class="stats-grid">
+  <div class="stat-card ok">
+    <div class="num" id="stat-ok">-</div>
+    <div class="lbl">API 成功</div>
+  </div>
+  <div class="stat-card err">
+    <div class="num" id="stat-fail">-</div>
+    <div class="lbl">API 失败</div>
+  </div>
+  <div class="stat-card">
+    <div class="num" id="stat-sql">-</div>
+    <div class="lbl">SQL 写入</div>
+  </div>
+  <div class="stat-card">
+    <div class="num" id="stat-symbols">-</div>
+    <div class="lbl">已生成交易对</div>
+  </div>
+  <div class="stat-card">
+    <div class="num" id="stat-batch">-</div>
+    <div class="lbl">批量运行次数</div>
+  </div>
+  <div class="stat-card">
+    <div class="num" id="stat-files">-</div>
+    <div class="lbl">SQL 文件数</div>
+  </div>
+</div>
+
+<div class="section-title">实时操作日志</div>
+<div class="log-wrap">
+  <table class="log-table" id="log-table">
+    <tbody id="log-body">
+      <tr><td colspan="4" class="empty">加载中...</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="footer">
+  <span><span id="live-dot" class="pulse">●</span> 实时刷新 (3s)</span>
+  <span id="log-count">0 条日志</span>
+</div>
+
+<script>
+var lastTs = 0;
+var allLogs = [];
+
+function tagClass(action) {
+  return 'tag tag-' + action.toLowerCase();
+}
+
+function statusHtml(s) {
+  if (!s) return '';
+  if (s === 'OK')   return '<span class="status-ok">✓ OK</span>';
+  if (s === 'FAIL') return '<span class="status-fail">✗ FAIL</span>';
+  return '<span>' + s + '</span>';
+}
+
+function timeShort(t) {
+  return t ? t.substring(11) : '';  // 只显示时分秒
+}
+
+function renderLogs() {
+  var tbody = document.getElementById('log-body');
+  if (allLogs.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" class="empty">暂无日志</td></tr>';
+    return;
+  }
+  // 最新的在上面
+  var rows = '';
+  var display = allLogs.slice().reverse().slice(0, 100);
+  for (var i = 0; i < display.length; i++) {
+    var log = display[i];
+    rows += '<tr>' +
+      '<td class="time-col">' + timeShort(log.time) + '</td>' +
+      '<td><span class="' + tagClass(log.action) + '">' + log.action + '</span></td>' +
+      '<td>' + statusHtml(log.status) + '</td>' +
+      '<td class="detail">' + escHtml(log.detail || '') + '</td>' +
+      '</tr>';
+  }
+  tbody.innerHTML = rows;
+  document.getElementById('log-count').textContent = allLogs.length + ' 条日志';
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function fetchLogs() {
+  fetch('api.php?action=logs&limit=200&since=' + lastTs)
+    .then(function(r){ return r.json(); })
+    .then(function(data) {
+      if (data.logs && data.logs.length > 0) {
+        allLogs = allLogs.concat(data.logs);
+        // 去重
+        var seen = {};
+        allLogs = allLogs.filter(function(l) {
+          var key = l.ts + l.action + l.detail;
+          if (seen[key]) return false;
+          seen[key] = true;
+          return true;
+        });
+        lastTs = allLogs[allLogs.length - 1].ts;
+        renderLogs();
+      }
+    })
+    .catch(function(){});
+}
+
+function fetchStats() {
+  fetch('api.php?action=stats')
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      document.getElementById('stat-ok').textContent      = d.api_ok;
+      document.getElementById('stat-fail').textContent    = d.api_fail;
+      document.getElementById('stat-sql').textContent     = d.sql_writes;
+      document.getElementById('stat-symbols').textContent = d.symbols_done;
+      document.getElementById('stat-batch').textContent   = d.batch_runs;
+      document.getElementById('stat-files').textContent   = d.sql_files;
+      document.getElementById('server-time').textContent  = d.server_time;
+
+      // AI 费用
+      if (d.ai) {
+        var cost = d.ai.cost_usd ? '$' + parseFloat(d.ai.cost_usd).toFixed(4) : '$0.0000';
+        document.getElementById('ai-cost-val').textContent = cost;
+        var tk = (d.ai.tokens_in || 0) + (d.ai.tokens_out || 0);
+        document.getElementById('ai-tokens').textContent = tk.toLocaleString() + ' tokens';
+        document.getElementById('ai-model').textContent = d.ai.model || '';
+      }
+    })
+    .catch(function(){});
+}
+
+function refresh() {
+  fetchLogs();
+  fetchStats();
+}
+
+// 初始加载
+fetch('api.php?action=logs&limit=200')
+  .then(function(r){ return r.json(); })
+  .then(function(data) {
+    allLogs = data.logs || [];
+    if (allLogs.length > 0) {
+      lastTs = allLogs[allLogs.length - 1].ts;
+    }
+    renderLogs();
+  });
+
+fetchStats();
+
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>
