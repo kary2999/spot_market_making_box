@@ -43,7 +43,9 @@ define('DEPTH_OTHER', 20);
  */
 function calc_near_ticks($currentPrice, $tickSize)
 {
-    $ticks = (int)round((float)$currentPrice * NEAR_PCT_PER_DOM / (float)$tickSize);
+    $ts = (float)$tickSize;
+    if ($ts <= 0) { $ts = 0.01; }
+    $ticks = (int)round((float)$currentPrice * NEAR_PCT_PER_DOM / $ts);
     $ticks = max(NEAR_TICKS_MIN, min(NEAR_TICKS_MAX, $ticks));
     return $ticks;
 }
@@ -267,17 +269,21 @@ function make_other_number_float($medianQty, $stepSize, $ratio)
 
 function build_price_ranges($currentPrice, $tickSize, $levels, $direction, $nearLevels, $nearTicksPerDom)
 {
-    $totalNearTicks = $nearTicksPerDom * $nearLevels;
-    $nearOffset = bcmul((string)$totalNearTicks, $tickSize, 20);
-    $nearPctWidth = bcdiv(bcmul($nearOffset, '100', 10), $currentPrice, 10);
+    // 安全保底
+    if ($nearLevels < 1) { $nearLevels = 1; }
+    if (bccomp($currentPrice, '0', 10) <= 0) { $currentPrice = '1'; }
 
-    $totalPctWidth = '50';
+    $totalNearTicks = $nearTicksPerDom * $nearLevels;
+    $nearOffset     = bcmul((string)$totalNearTicks, $tickSize, 20);
+    $nearPctWidth   = bcdiv(bcmul($nearOffset, '100', 10), $currentPrice, 10);
+
+    $totalPctWidth  = '50';
     $remainPctWidth = bcsub($totalPctWidth, $nearPctWidth, 10);
     if (bccomp($remainPctWidth, '0', 10) <= 0) {
         $remainPctWidth = '0.001';
     }
 
-    $remainLevels = $levels - $nearLevels;
+    $remainLevels = max(0, $levels - $nearLevels);
     $nearPerDom   = bcdiv($nearPctWidth, (string)$nearLevels, 10);
     $remainPerDom = $remainLevels > 0 ? bcdiv($remainPctWidth, (string)$remainLevels, 10) : '0';
 
