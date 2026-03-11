@@ -150,15 +150,13 @@ function format_qty($value, $stepSize)
 }
 
 /**
- * 计算盘口挂单量中位数
+ * 计算盘口挂单量统计：中位数 + 真实最小值
  *
- * 策略：
- *   1. 收集买卖双侧前 depth 档的单档量
- *   2. 去掉最大值（异常大单，不作参考）
- *   3. 取中位数作为基准量
- *   4. 最小值作为下限（不低于 min）
+ * 返回 array:
+ *   'median' => 去最大值后的中位数（基准量）
+ *   'min'    => 盘口实际最小单档量（作为挂单下限）
  */
-function calc_depth_median_qty($orderBook, $depth)
+function calc_depth_stats($orderBook, $depth)
 {
     $bids = isset($orderBook['bids']) ? $orderBook['bids'] : array();
     $asks = isset($orderBook['asks']) ? $orderBook['asks'] : array();
@@ -172,52 +170,58 @@ function calc_depth_median_qty($orderBook, $depth)
     }
 
     if (empty($quantities)) {
-        return '0';
+        return array('median' => '0', 'min' => '0');
     }
 
     sort($quantities);
 
-    // 去掉最大值（最后一个）
+    $minQty = $quantities[0];  // 盘口真实最小量
+
+    // 去掉最大值后取中位数
     if (count($quantities) > 1) {
         array_pop($quantities);
     }
-
     $count = count($quantities);
-    $minQty = $quantities[0];
-
-    // 中位数
     if ($count % 2 === 0) {
         $median = ($quantities[$count / 2 - 1] + $quantities[$count / 2]) / 2;
     } else {
         $median = $quantities[intdiv($count, 2)];
     }
 
-    // 以中位数为基准，最小值为下限
-    $base = max($median, $minQty);
-
-    return number_format($base, 1, '.', '');
+    return array(
+        'median' => number_format($median, 1, '.', ''),
+        'min'    => number_format($minQty, 1, '.', ''),
+    );
 }
 
 /**
  * 生成 number_float 区间
- * $ratio: 相对中位数的比例系数
- *   近盘用较小系数（量薄，自然），中远盘用较大系数（量厚，承接滑点）
+ *   qtyMin = binance 盘口最小量 × ratio（保留自然比例，作为下限）
+ *   qtyMax = binance 盘口中位数 × ratio
  */
-function make_number_float($medianQty, $stepSize, $ratio = '0.2')
+function make_number_float($medianQty, $realMinQty, $stepSize, $ratio = '0.2')
 {
-    $base = bcmul($medianQty, $ratio, 20);
-    if (bccomp($base, $stepSize) < 0) {
-        $base = $stepSize;
+    // 对 min 和 median 同比例缩放，保留市场自然分布
+    $qtyMin = bcmul($realMinQty, $ratio, 20);
+    $qtyMax = bcmul($medianQty, $ratio, 20);
+
+    // 不能低于最小步长
+    if (bccomp($qtyMin, $stepSize) < 0) {
+        $qtyMin = $stepSize;
+    }
+    // 上限至少是下限的 1.5 倍
+    if (bccomp($qtyMax, bcmul($qtyMin, '1.5', 10)) < 0) {
+        $qtyMax = bcmul($qtyMin, '1.5', 10);
     }
 
-    $qtyMin = format_qty(bcmul($base, '0.5', 20), $stepSize);
-    $qtyMax = format_qty($base, $stepSize);
+    $qtyMinFmt = format_qty($qtyMin, $stepSize);
+    $qtyMaxFmt = format_qty($qtyMax, $stepSize);
 
-    if ($qtyMin === $qtyMax) {
-        $qtyMin = format_qty($stepSize, $stepSize);
+    if ($qtyMinFmt === $qtyMaxFmt) {
+        $qtyMaxFmt = format_qty(bcmul($qtyMin, '2', 20), $stepSize);
     }
 
-    return $qtyMin . '-' . $qtyMax;
+    return $qtyMinFmt . '-' . $qtyMaxFmt;
 }
 
 // ==================== 核心：价格区间 ====================
@@ -275,13 +279,13 @@ function generate_configs($symbol, $levels, $totalUsdt, $pid, $currentPrice, $lo
     // 买卖各占一半
     $oneSideTrust = (int)floor($totalTrust / 2);
 
-    // 近盘：前5档中位数 × 0.08（薄铺，自然，不压过中远盘）
-    $nearMedianQty  = calc_depth_median_qty($orderBook, DEPTH_NEAR);
-    // 中远盘：前20档中位数 × 0.2（量厚，承接大单/滑点）
-    $otherMedianQty = calc_depth_median_qty($orderBook, DEPTH_OTHER);
+    // 近盘：前5档统计（中位数×0.08，最小量=盘口真实最小）
+    $nearStats  = calc_depth_stats($orderBook, DEPTH_NEAR);
+    // 中远盘：前20档统计（中位数×0.2，最小量=盘口真实最小）
+    $otherStats = calc_depth_stats($orderBook, DEPTH_OTHER);
 
-    $nearNumberFloat  = make_number_float($nearMedianQty, $stepSize, '0.08');
-    $otherNumberFloat = make_number_float($otherMedianQty, $stepSize, '0.2');
+    $nearNumberFloat  = make_number_float($nearStats['median'],  $nearStats['min'],  $stepSize, '0.08');
+    $otherNumberFloat = make_number_float($otherStats['median'], $otherStats['min'], $stepSize, '0.2');
 
     // 近盘 trust_num = tick数 × 填充率（但不超过单侧总量的 30%）
     $nearTrustPerDom = max(1, (int)round(NEAR_TICKS_PER_DOM * NEAR_FILL_RATE));
