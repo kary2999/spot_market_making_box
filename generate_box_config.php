@@ -1,52 +1,30 @@
 <?php
 /**
- * 现货铺单配置生成器 (PHP 7.3+ 版)
+ * 现货铺单配置生成器 (PHP 7.3+)
+ *
+ * 规则：
+ *   - 9 档位，覆盖当前价 ±50%
+ *   - 近盘（dom 1-2）：占据前 100 个价格的 80%-100%
+ *   - 近盘挂单量：对标交易对深度均量
+ *   - 中盘+远盘（dom 3-9）：均分剩余价格区间和挂单量
  *
  * 用法:
- *   php generate_box_config.php --symbol eth_usdt --pid 3 --levels 9 \
+ *   php generate_box_config.php --symbol trx_usdt --pid 3 --levels 9 \
  *       --total_usdt 2000000 --depth_ratio 0.3
- *
- * 参数:
- *   --symbol       交易对 (btc_usdt / eth_usdt)
- *   --pid          项目 ID
- *   --levels       每侧档位数 (默认 6)
- *   --total_usdt   总量 USDT (默认 1000000)
- *   --depth_ratio  深度比 (默认 0.2)
- *   --output_dir   输出目录 (默认 ./output)
- *   --near_ticks   近盘 tick 数 (默认 100)
- *   --mid_ticks    中盘 tick 数 (默认 2000)
- *   --far_pct      远盘最远百分比 (默认 5.0，即上下 5%)
  */
 
 bcscale(20);
 
-// ==================== 常量 ====================
-
-// 近盘：前 N 个 tick（紧贴当前价），铺满 80%
-define('DEFAULT_NEAR_TICKS', 100);
-
-// 中盘：近盘之后 N 个 tick
-define('DEFAULT_MID_TICKS', 2000);
-
-// 远盘：中盘之后到 far_pct% 的范围
-define('DEFAULT_FAR_PCT', 5.0);
-
-// 盘口深度取值档位
-define('DEPTH_LEVELS', array(
-    'near' => 2,
-    'mid'  => 8,
-    'far'  => 20,
-));
-
-// trust_num 分配比例（近盘少量高频，远盘大量低频）
-define('ZONE_TRUST_RATIOS', array(
-    'near' => 0.15,
-    'mid'  => 0.45,
-    'far'  => 0.40,
-));
-
 define('BINANCE_BASE_URL', 'https://api.binance.com');
 define('REQUEST_TIMEOUT', 10);
+
+// 近盘覆盖的 tick 数
+define('NEAR_TICKS', 100);
+
+// 近盘档位数（levels>6 时 2 档，否则 1 档）
+// 盘口取深度档位（用于计算 number_float）
+define('DEPTH_NEAR', 5);
+define('DEPTH_OTHER', 20);
 
 // ==================== 币安 API ====================
 
@@ -101,30 +79,18 @@ function get_exchange_info($symbol)
     }
 
     $filters = array();
-    $filterList = isset($symbols[0]['filters']) ? $symbols[0]['filters'] : array();
-    foreach ($filterList as $f) {
+    foreach ($symbols[0]['filters'] as $f) {
         $filters[$f['filterType']] = $f;
     }
 
-    $tickSize = null;
-    if (isset($filters['PRICE_FILTER']['tickSize'])) {
-        $tickSize = $filters['PRICE_FILTER']['tickSize'];
-    } elseif (isset($filters['LOT_SIZE']['stepSize'])) {
-        $tickSize = $filters['LOT_SIZE']['stepSize'];
-    }
-
+    $tickSize = isset($filters['PRICE_FILTER']['tickSize']) ? $filters['PRICE_FILTER']['tickSize'] : null;
     $stepSize = isset($filters['LOT_SIZE']['stepSize']) ? $filters['LOT_SIZE']['stepSize'] : null;
-    $minQty   = isset($filters['LOT_SIZE']['minQty']) ? $filters['LOT_SIZE']['minQty'] : null;
 
     if (!$tickSize || !$stepSize) {
-        throw new RuntimeException("未找到 tickSize/stepSize 信息: {$symbol}");
+        throw new RuntimeException("未找到精度信息: {$symbol}");
     }
 
-    return array(
-        'tickSize' => $tickSize,
-        'stepSize' => $stepSize,
-        'minQty'   => $minQty,
-    );
+    return array('tickSize' => $tickSize, 'stepSize' => $stepSize);
 }
 
 function get_order_book($symbol, $limit = 20)
@@ -135,19 +101,13 @@ function get_order_book($symbol, $limit = 20)
     ));
 }
 
-// ==================== 工具函数 ====================
+// ==================== 工具 ====================
 
 function decimal_places($tickStr)
 {
     $tickStr = rtrim(rtrim($tickStr, '0'), '.');
     $pos = strpos($tickStr, '.');
     return $pos === false ? 0 : strlen($tickStr) - $pos - 1;
-}
-
-function format_price($value, $tickSize)
-{
-    $places = decimal_places($tickSize);
-    return bcadd($value, '0', $places);
 }
 
 function format_qty($value, $stepSize)
@@ -157,80 +117,32 @@ function format_qty($value, $stepSize)
     return bcdiv(bcmul($value, $factor, 0), $factor, $places);
 }
 
-// ==================== 区间计算 ====================
+/**
+ * 计算盘口深度均量
+ * 取买卖双侧前 depth 档的累计量均值
+ */
+function calc_depth_avg_qty($orderBook, $depth)
+{
+    $bids = isset($orderBook['bids']) ? $orderBook['bids'] : array();
+    $asks = isset($orderBook['asks']) ? $orderBook['asks'] : array();
+
+    $bidTotal = '0';
+    $askTotal = '0';
+    for ($i = 0; $i < min($depth, count($bids)); $i++) {
+        $bidTotal = bcadd($bidTotal, $bids[$i][1]);
+    }
+    for ($i = 0; $i < min($depth, count($asks)); $i++) {
+        $askTotal = bcadd($askTotal, $asks[$i][1]);
+    }
+
+    return bcdiv(bcadd($bidTotal, $askTotal), '2', 10);
+}
 
 /**
- * 根据档位数分配近/中/远盘
- *
- * 原则：
- *   - 近盘占 1-2 档（levels<=6 取 1 档，>6 取 2 档）
- *   - 远盘占 1-2 档
- *   - 中盘占剩余
+ * 生成 number_float 区间字符串
  */
-function compute_zones($levels)
+function make_number_float($avgQty, $stepSize)
 {
-    if ($levels <= 3) {
-        $near = array(1);
-        $far  = array($levels);
-        $mid  = array();
-        for ($i = 2; $i < $levels; $i++) {
-            $mid[] = $i;
-        }
-    } elseif ($levels <= 6) {
-        $near = array(1);
-        $mid  = array();
-        $far  = array();
-        for ($i = 2; $i <= $levels - 2; $i++) {
-            $mid[] = $i;
-        }
-        for ($i = max(2, $levels - 1); $i <= $levels; $i++) {
-            $far[] = $i;
-        }
-    } else {
-        $near = array(1, 2);
-        $far  = array($levels - 1, $levels);
-        $mid  = array();
-        for ($i = 3; $i <= $levels - 2; $i++) {
-            $mid[] = $i;
-        }
-    }
-
-    return array(
-        'near' => $near,
-        'mid'  => $mid,
-        'far'  => $far,
-    );
-}
-
-function zone_of($dom, $zones)
-{
-    if (in_array($dom, $zones['near'])) return 'near';
-    if (in_array($dom, $zones['mid'])) return 'mid';
-    return 'far';
-}
-
-// ==================== 盘口深度计算 ====================
-
-function cumulative_qty($side, $depth)
-{
-    $total = '0';
-    $count = min($depth, count($side));
-    for ($i = 0; $i < $count; $i++) {
-        $total = bcadd($total, $side[$i][1]);
-    }
-    return $total;
-}
-
-function calc_number_float($orderBook, $zone, $stepSize)
-{
-    $depthLevels = DEPTH_LEVELS;
-    $depth  = $depthLevels[$zone];
-    $bids   = isset($orderBook['bids']) ? $orderBook['bids'] : array();
-    $asks   = isset($orderBook['asks']) ? $orderBook['asks'] : array();
-    $bidQty = cumulative_qty($bids, $depth);
-    $askQty = cumulative_qty($asks, $depth);
-    $avgQty = bcdiv(bcadd($bidQty, $askQty), '2', 20);
-
     $base = bcmul($avgQty, '0.2', 20);
     if (bccomp($base, $stepSize) < 0) {
         $base = $stepSize;
@@ -246,75 +158,56 @@ function calc_number_float($orderBook, $zone, $stepSize)
     return $qtyMin . '-' . $qtyMax;
 }
 
-// ==================== 价格区间计算（基于 tick 数） ====================
+// ==================== 核心：价格区间计算 ====================
 
 /**
- * 基于实际 tick 数计算各档位价格百分比区间
+ * 计算各档位价格百分比区间
  *
- * 核心逻辑：
- *   近盘 = 当前价 ± nearTicks × tickSize → 转为百分比
- *   中盘 = 近盘边界 ± midTicks × tickSize → 转为百分比
- *   远盘 = 中盘边界到 farPct% 范围
- *
- * 这样不同价格/精度的币种，近盘永远是紧贴当前价的 N 个 tick
+ * 规则：
+ *   总范围 = ±50%（卖方 100%~150%，买方 50%~100%）
+ *   近盘（dom 1~nearLevels）= 前 NEAR_TICKS 个 tick，均分
+ *   剩余档位 = 均分剩余区间
  */
-function build_price_ranges($currentPrice, $tickSize, $levels, $direction, $nearTicks, $midTicks, $farPct)
+function build_price_ranges($currentPrice, $tickSize, $levels, $direction, $nearLevels)
 {
-    $price = $currentPrice;
-    $zones = compute_zones($levels);
-    $nearCount = count($zones['near']);
-    $midCount  = count($zones['mid']);
-    $farCount  = count($zones['far']);
+    // 近盘百分比宽度 = NEAR_TICKS × tickSize / currentPrice × 100
+    $nearOffset = bcmul((string)NEAR_TICKS, $tickSize, 20);
+    $nearPctWidth = bcdiv(bcmul($nearOffset, '100', 10), $currentPrice, 10);
 
-    // 各区间的实际价格偏移量
-    $nearOffset = bcmul((string)$nearTicks, $tickSize, 20);
-    $midOffset  = bcmul((string)$midTicks, $tickSize, 20);
+    // 总范围 50%
+    $totalPctWidth = '50';
 
-    // 转为百分比偏移（相对当前价）
-    // nearPctWidth = nearOffset / price * 100
-    $nearPctWidth = bcdiv(bcmul($nearOffset, '100', 10), $price, 10);
-    $midPctWidth  = bcdiv(bcmul($midOffset, '100', 10), $price, 10);
-    $farPctWidth  = (string)$farPct;
+    // 剩余范围 = 50% - 近盘宽度
+    $remainPctWidth = bcsub($totalPctWidth, $nearPctWidth, 10);
+    if (bccomp($remainPctWidth, '0', 10) <= 0) {
+        $remainPctWidth = '0.001';
+    }
 
-    // 总范围 = near + mid + far
-    $totalPctWidth = bcadd(bcadd($nearPctWidth, $midPctWidth, 10), $farPctWidth, 10);
+    // 剩余档位数
+    $remainLevels = $levels - $nearLevels;
 
-    // 每档的百分比宽度
-    $nearPerDom = $nearCount > 0 ? bcdiv($nearPctWidth, (string)$nearCount, 10) : '0';
-    $midPerDom  = $midCount > 0 ? bcdiv($midPctWidth, (string)$midCount, 10) : '0';
-    $farPerDom  = $farCount > 0 ? bcdiv($farPctWidth, (string)$farCount, 10) : '0';
+    // 每档宽度
+    $nearPerDom   = bcdiv($nearPctWidth, (string)$nearLevels, 10);
+    $remainPerDom = $remainLevels > 0 ? bcdiv($remainPctWidth, (string)$remainLevels, 10) : '0';
 
     $ranges    = array();
     $cursorPct = '100';
 
     for ($dom = 1; $dom <= $levels; $dom++) {
-        $zone = zone_of($dom, $zones);
-        switch ($zone) {
-            case 'near': $widthPct = $nearPerDom; break;
-            case 'mid':  $widthPct = $midPerDom; break;
-            default:     $widthPct = $farPerDom; break;
-        }
-
+        $isNear = ($dom <= $nearLevels);
+        $widthPct = $isNear ? $nearPerDom : $remainPerDom;
         $isLast = ($dom === $levels);
 
         if ($direction === -1) {
-            // 卖方：100% 向上
+            // 卖方：100% → 150%
             $lowPct  = $cursorPct;
-            if ($isLast) {
-                $highPct = bcadd('100', $totalPctWidth, 10);
-            } else {
-                $highPct = bcadd($cursorPct, $widthPct, 10);
-            }
+            $highPct = $isLast ? '150' : bcadd($cursorPct, $widthPct, 10);
             $ranges[] = array($lowPct, $highPct);
             $cursorPct = $highPct;
         } else {
-            // 买方：100% 向下
+            // 买方：100% → 50%
             $highPct = $cursorPct;
-            if ($isLast) {
-                $lowPct = bcsub('100', $totalPctWidth, 10);
-            } else {
-                $lowPct = bcsub($cursorPct, $widthPct, 10);
-            }
+            $lowPct  = $isLast ? '50' : bcsub($cursorPct, $widthPct, 10);
             $ranges[] = array($lowPct, $highPct);
             $cursorPct = $lowPct;
         }
@@ -325,59 +218,59 @@ function build_price_ranges($currentPrice, $tickSize, $levels, $direction, $near
 
 // ==================== 配置生成 ====================
 
-function generate_configs($symbol, $levels, $totalUsdt, $pid, $currentPrice, $exchangeInfo, $orderBook, $nearTicks, $midTicks, $farPct)
+function generate_configs($symbol, $levels, $totalUsdt, $pid, $currentPrice, $exchangeInfo, $orderBook)
 {
     $tickSize = $exchangeInfo['tickSize'];
     $stepSize = $exchangeInfo['stepSize'];
-    $zones    = compute_zones($levels);
 
-    // trust_num 按区间比例分配
+    // 近盘档位数
+    $nearLevels = ($levels > 6) ? 2 : 1;
+    $remainLevels = $levels - $nearLevels;
+
+    // 总委托笔数
     $totalTrust = 1000;
-    $trustRatios = ZONE_TRUST_RATIOS;
+
+    // 近盘挂单量 = 对标深度均量
+    $nearDepthQty  = calc_depth_avg_qty($orderBook, DEPTH_NEAR);
+    $otherDepthQty = calc_depth_avg_qty($orderBook, DEPTH_OTHER);
+
+    $nearNumberFloat  = make_number_float($nearDepthQty, $stepSize);
+    $otherNumberFloat = make_number_float($otherDepthQty, $stepSize);
+
+    // 近盘 trust_num：总量的 15%，均分给近盘档位
+    $nearTrustTotal = max(1, (int)round($totalTrust * 0.15));
+    $nearTrustPerDom = max(1, (int)round($nearTrustTotal / $nearLevels));
+
+    // 剩余 trust_num：均分给中远盘
+    $remainTrustTotal = $totalTrust - $nearTrustTotal;
+    $remainTrustPerDom = $remainLevels > 0 ? max(1, (int)round($remainTrustTotal / $remainLevels)) : 0;
 
     $configs = array();
-    $directions = array(-1, 1);
 
-    foreach ($directions as $direction) {
-        $priceRanges = build_price_ranges($currentPrice, $tickSize, $levels, $direction, $nearTicks, $midTicks, $farPct);
-
-        $zoneNumberFloat = array();
-        $zoneNames = array('near', 'mid', 'far');
-        foreach ($zoneNames as $zone) {
-            $zoneNumberFloat[$zone] = calc_number_float($orderBook, $zone, $stepSize);
-        }
+    foreach (array(-1, 1) as $direction) {
+        $priceRanges = build_price_ranges($currentPrice, $tickSize, $levels, $direction, $nearLevels);
 
         for ($dom = 1; $dom <= $levels; $dom++) {
-            $zone = zone_of($dom, $zones);
-            $zoneCount = count($zones[$zone]);
-
-            // trust_num = 总量 × 区间比例 / 该区间档位数
-            $ratio = $trustRatios[$zone];
-            $trustNum = max(1, (int)round($totalTrust * $ratio / max(1, $zoneCount)));
+            $isNear = ($dom <= $nearLevels);
 
             $lowPct  = $priceRanges[$dom - 1][0];
             $highPct = $priceRanges[$dom - 1][1];
             $priceFloat = bcadd($lowPct, '0', 3) . '-' . bcadd($highPct, '0', 3);
-
-            $numberFloat       = $zoneNumberFloat[$zone];
-            $changeNumberFloat = $numberFloat;
-            $changeTrustNum    = in_array($dom, $zones['near']) ? 0 : 1;
-            $changeSurvival    = in_array($dom, $zones['near']) ? '3-10' : '10-30';
 
             $configs[] = array(
                 'box_id'                => null,
                 'pid'                   => $pid,
                 'direction'             => $direction,
                 'dom'                   => $dom,
-                'trust_num'             => $trustNum,
+                'trust_num'             => $isNear ? $nearTrustPerDom : $remainTrustPerDom,
                 'price_float'           => $priceFloat,
-                'number_float'          => $numberFloat,
-                'change_trust_num'      => $changeTrustNum,
-                'change_number_float'   => $changeNumberFloat,
-                'change_survival_time'  => $changeSurvival,
+                'number_float'          => $isNear ? $nearNumberFloat : $otherNumberFloat,
+                'change_trust_num'      => $isNear ? 0 : 1,
+                'change_number_float'   => $isNear ? $nearNumberFloat : $otherNumberFloat,
+                'change_survival_time'  => $isNear ? '3-10' : '10-30',
                 'status'                => 1,
                 '_symbol'               => $symbol,
-                '_zone'                 => $zone,
+                '_zone'                 => $isNear ? 'near' : 'other',
                 '_direction_label'      => $direction === -1 ? '卖' : '买',
             );
         }
@@ -427,49 +320,48 @@ function generate_sql($configs, $outputPath)
 
 // ==================== 控制台输出 ====================
 
-function pct_to_actual($priceFloatPct, $referencePrice)
+function pct_to_actual($priceFloatPct, $refPrice)
 {
     $parts = explode('-', $priceFloatPct);
-    $lowS  = $parts[0];
-    $highS = $parts[1];
-    $lowPrice  = bcdiv(bcmul($referencePrice, $lowS, 10), '100', 6);
-    $highPrice = bcdiv(bcmul($referencePrice, $highS, 10), '100', 6);
-    return $lowPrice . '-' . $highPrice;
+    $low  = bcdiv(bcmul($refPrice, $parts[0], 10), '100', 6);
+    $high = bcdiv(bcmul($refPrice, $parts[1], 10), '100', 6);
+    return $low . ' ~ ' . $high;
 }
 
-function ticks_in_range($priceFloatPct, $referencePrice, $tickSize)
+function pct_width($priceFloatPct)
 {
     $parts = explode('-', $priceFloatPct);
-    $lowPrice  = bcdiv(bcmul($referencePrice, $parts[0], 10), '100', 10);
-    $highPrice = bcdiv(bcmul($referencePrice, $parts[1], 10), '100', 10);
-    $diff = bcsub($highPrice, $lowPrice, 10);
+    return bcsub($parts[1], $parts[0], 3);
+}
+
+function ticks_count($priceFloatPct, $refPrice, $tickSize)
+{
+    $parts = explode('-', $priceFloatPct);
+    $low  = bcdiv(bcmul($refPrice, $parts[0], 10), '100', 10);
+    $high = bcdiv(bcmul($refPrice, $parts[1], 10), '100', 10);
+    $diff = bcsub($high, $low, 10);
     if (bccomp($diff, '0', 10) < 0) {
         $diff = bcmul($diff, '-1', 10);
     }
     return (int)bcdiv($diff, $tickSize, 0);
 }
 
-function print_header($symbol, $currentPrice, $pid, $levels, $totalUsdt, $depthRatio, $recordCount, $tickSize, $nearTicks, $midTicks, $farPct)
+function print_output($configs, $levels, $currentPrice, $tickSize, $symbol, $pid, $totalUsdt, $depthRatio)
 {
-    $singleSide    = $totalUsdt * $depthRatio / 2;
+    $nearOffset = bcmul((string)NEAR_TICKS, $tickSize, 10);
+    $nearPct    = bcdiv(bcmul($nearOffset, '100', 10), $currentPrice, 4);
     $symbolDisplay = strtoupper(str_replace('_', '/', $symbol));
-    $sellCount     = intdiv($recordCount, 2);
-    $buyCount      = $recordCount - $sellCount;
-    $tickPlaces    = decimal_places($tickSize);
+    $pricePlaces   = decimal_places($tickSize);
 
+    // 标题
     $sep = str_repeat('-', 70);
     echo "\n{$sep}\n";
-    echo "  交易对     : {$symbolDisplay}  (参考价: {$currentPrice})\n";
-    echo "  tickSize   : {$tickSize} ({$tickPlaces} 位精度)\n";
-    echo sprintf("  pid        : %d   档位数: %d   总量: %s USDT\n", $pid, $levels, number_format($totalUsdt, 0));
-    echo sprintf("  深度比     : %.1f   单边有效量: %s USDT\n", $depthRatio, number_format($singleSide, 0));
-    echo sprintf("  近盘 ticks : %d   中盘 ticks: %d   远盘: %.1f%%\n", $nearTicks, $midTicks, $farPct);
-    echo "  生成记录   : {$recordCount} 条 ({$sellCount} 卖单 + {$buyCount} 买单)\n";
+    echo "  交易对   : {$symbolDisplay}  (当前价: {$currentPrice})\n";
+    echo "  tickSize : {$tickSize} ({$pricePlaces}位)   近盘: " . NEAR_TICKS . " ticks = {$nearOffset} ({$nearPct}%)\n";
+    echo sprintf("  pid: %d   levels: %d   total: %s USDT   depth_ratio: %.1f\n", $pid, $levels, number_format($totalUsdt, 0), $depthRatio);
     echo "{$sep}\n\n";
-}
 
-function print_table($configs, $levels, $referencePrice, $tickSize)
-{
+    // 分卖买
     $sellMap = array();
     $buyMap  = array();
     foreach ($configs as $c) {
@@ -480,102 +372,64 @@ function print_table($configs, $levels, $referencePrice, $tickSize)
         }
     }
 
-    $zoneCn = array('near' => '近盘', 'mid' => '中盘', 'far' => '远盘');
+    // 表格
+    echo sprintf(" %-3s %-6s %6s %6s %6s  %-22s  %-22s  %-16s\n",
+        'dom', '区域', '笔数', 'ticks', '宽度%', '卖价区间', '买价区间', '数量区间');
+    echo str_repeat('-', 105) . "\n";
 
-    echo sprintf("%-4s %-6s %6s %6s  %-24s  %-24s\n", '档位', '区域', '委托数', 'ticks', '卖 price_float(%)', '买 price_float(%)');
-    echo str_repeat('-', 85) . "\n";
+    $zoneCn = array('near' => '近盘', 'other' => '均分');
 
     for ($dom = 1; $dom <= $levels; $dom++) {
         $sc = isset($sellMap[$dom]) ? $sellMap[$dom] : array();
         $bc = isset($buyMap[$dom]) ? $buyMap[$dom] : array();
-        $zoneKey   = isset($sc['_zone']) ? $sc['_zone'] : '';
-        $zoneLabel = isset($zoneCn[$zoneKey]) ? $zoneCn[$zoneKey] : '';
+
+        $zone      = isset($sc['_zone']) ? $sc['_zone'] : '';
+        $zoneLabel = isset($zoneCn[$zone]) ? $zoneCn[$zone] : '';
         $trustNum  = isset($sc['trust_num']) ? $sc['trust_num'] : '-';
         $sellPf    = isset($sc['price_float']) ? $sc['price_float'] : '-';
         $buyPf     = isset($bc['price_float']) ? $bc['price_float'] : '-';
-        $ticks     = $sellPf !== '-' ? ticks_in_range($sellPf, $referencePrice, $tickSize) : '-';
-        echo sprintf(" %-3d %-6s %6s %6s  %-24s  %-24s\n", $dom, $zoneLabel, $trustNum, $ticks, $sellPf, $buyPf);
+        $numFloat  = isset($sc['number_float']) ? $sc['number_float'] : '-';
+        $ticks     = $sellPf !== '-' ? ticks_count($sellPf, $currentPrice, $tickSize) : '-';
+        $width     = $sellPf !== '-' ? pct_width($sellPf) : '-';
+
+        echo sprintf(" %-3d %-6s %6s %6s %6s  %-22s  %-22s  %-16s\n",
+            $dom, $zoneLabel, $trustNum, $ticks, $width, $sellPf, $buyPf, $numFloat);
     }
     echo "\n";
-}
 
-function print_summary($configs, $referencePrice, $tickSize)
-{
-    $header = sprintf(
-        "%-4s %-4s %-6s %6s %6s %-22s %-22s %-16s %6s %-8s",
-        '方向', '档位', '区间', '笔数', 'ticks', '价格区间(%)', '实际价格', '数量区间', '变幻', '存活'
-    );
-    $sep = str_repeat('-', strlen($header) + 10);
-
-    echo "\n" . str_repeat('=', strlen($header) + 10) . "\n";
-    echo " 铺单配置摘要\n";
-    echo str_repeat('=', strlen($header) + 10) . "\n";
-    echo $header . "\n";
-    echo $sep . "\n";
-
-    $zoneCn = array('near' => '近盘', 'mid' => '中盘', 'far' => '远盘');
-
-    foreach ($configs as $c) {
-        $actual    = pct_to_actual($c['price_float'], $referencePrice);
-        $zoneKey   = isset($c['_zone']) ? $c['_zone'] : '';
-        $zoneLabel = isset($zoneCn[$zoneKey]) ? $zoneCn[$zoneKey] : '';
-        $ticks     = ticks_in_range($c['price_float'], $referencePrice, $tickSize);
-        echo sprintf(
-            " %-4s %-4d %-6s %6d %6d %-22s %-22s %-16s %6d %-8s\n",
-            $c['_direction_label'],
-            $c['dom'],
-            $zoneLabel,
-            $c['trust_num'],
-            $ticks,
-            $c['price_float'],
-            $actual,
-            $c['number_float'],
-            $c['change_trust_num'],
-            $c['change_survival_time']
-        );
+    // 实际价格明细
+    echo " 实际价格对照:\n";
+    echo str_repeat('-', 70) . "\n";
+    for ($dom = 1; $dom <= $levels; $dom++) {
+        $sc = isset($sellMap[$dom]) ? $sellMap[$dom] : array();
+        $bc = isset($buyMap[$dom]) ? $buyMap[$dom] : array();
+        $sellActual = isset($sc['price_float']) ? pct_to_actual($sc['price_float'], $currentPrice) : '-';
+        $buyActual  = isset($bc['price_float']) ? pct_to_actual($bc['price_float'], $currentPrice) : '-';
+        echo sprintf(" dom%-2d  卖: %-28s  买: %-28s\n", $dom, $sellActual, $buyActual);
     }
-
-    echo $sep . "\n";
-    echo sprintf("共 %d 条配置\n\n", count($configs));
+    echo "\n共 " . count($configs) . " 条配置\n\n";
 }
 
-// ==================== CLI 入口 ====================
+// ==================== CLI ====================
 
 function parse_args()
 {
     $opts = getopt('', array(
         'symbol:', 'pid:', 'levels:', 'total_usdt:', 'depth_ratio:', 'output_dir:',
-        'near_ticks:', 'mid_ticks:', 'far_pct:',
     ));
 
     if (empty($opts['symbol']) || !isset($opts['pid'])) {
-        echo "现货铺单配置生成器 (PHP 7.3+ 版)\n\n";
-        echo "用法:\n";
-        echo "  php generate_box_config.php --symbol trx_usdt --pid 3 --levels 9 \\\n";
-        echo "      --total_usdt 2000000 --depth_ratio 0.3\n\n";
-        echo "参数:\n";
-        echo "  --symbol       交易对 (必填，如 trx_usdt / eth_usdt)\n";
-        echo "  --pid          项目 ID (必填)\n";
-        echo "  --levels       每侧档位数 (默认 6)\n";
-        echo "  --total_usdt   总量 USDT (默认 1000000)\n";
-        echo "  --depth_ratio  深度比 (默认 0.2)\n";
-        echo "  --output_dir   输出目录 (默认 ./output)\n";
-        echo "  --near_ticks   近盘 tick 数 (默认 100)\n";
-        echo "  --mid_ticks    中盘 tick 数 (默认 2000)\n";
-        echo "  --far_pct      远盘最远百分比 (默认 5.0)\n";
+        echo "用法: php generate_box_config.php --symbol trx_usdt --pid 3 --levels 9 --total_usdt 2000000 --depth_ratio 0.3\n";
         exit(1);
     }
 
     return array(
         'symbol'      => strtolower($opts['symbol']),
         'pid'         => (int)$opts['pid'],
-        'levels'      => isset($opts['levels']) ? (int)$opts['levels'] : 6,
+        'levels'      => isset($opts['levels']) ? (int)$opts['levels'] : 9,
         'total_usdt'  => isset($opts['total_usdt']) ? (float)$opts['total_usdt'] : 1000000.0,
         'depth_ratio' => isset($opts['depth_ratio']) ? (float)$opts['depth_ratio'] : 0.2,
         'output_dir'  => isset($opts['output_dir']) ? $opts['output_dir'] : 'output',
-        'near_ticks'  => isset($opts['near_ticks']) ? (int)$opts['near_ticks'] : DEFAULT_NEAR_TICKS,
-        'mid_ticks'   => isset($opts['mid_ticks']) ? (int)$opts['mid_ticks'] : DEFAULT_MID_TICKS,
-        'far_pct'     => isset($opts['far_pct']) ? (float)$opts['far_pct'] : DEFAULT_FAR_PCT,
     );
 }
 
@@ -583,58 +437,34 @@ function main()
 {
     $args = parse_args();
 
-    $symbol     = $args['symbol'];
-    $pid        = $args['pid'];
-    $levels     = $args['levels'];
-    $totalUsdt  = $args['total_usdt'];
-    $depthRatio = $args['depth_ratio'];
-    $outputDir  = $args['output_dir'];
-    $nearTicks  = $args['near_ticks'];
-    $midTicks   = $args['mid_ticks'];
-    $farPct     = $args['far_pct'];
-
-    // 1. 拉取币安数据
-    echo "[API] 正在获取 " . strtoupper($symbol) . " 行情数据...\n";
+    echo "[API] 正在获取 " . strtoupper($args['symbol']) . " 行情数据...\n";
 
     try {
-        $currentPrice = get_price($symbol);
-        $exchangeInfo = get_exchange_info($symbol);
-        $orderBook    = get_order_book($symbol, 20);
+        $currentPrice = get_price($args['symbol']);
+        $exchangeInfo = get_exchange_info($args['symbol']);
+        $orderBook    = get_order_book($args['symbol'], 20);
     } catch (Exception $e) {
-        fwrite(STDERR, "[错误] 币安 API 请求失败: " . $e->getMessage() . "\n");
+        fwrite(STDERR, "[错误] " . $e->getMessage() . "\n");
         exit(1);
     }
 
-    $tickSize = $exchangeInfo['tickSize'];
-    echo "[API] 参考价格: {$currentPrice}  tickSize: {$tickSize}\n";
+    echo "[API] 价格: {$currentPrice}  tickSize: {$exchangeInfo['tickSize']}  stepSize: {$exchangeInfo['stepSize']}\n";
 
-    // 显示近盘实际覆盖的价格范围
-    $nearOffset = bcmul((string)$nearTicks, $tickSize, 10);
-    $nearPct    = bcdiv(bcmul($nearOffset, '100', 10), $currentPrice, 4);
-    echo "[计算] 近盘 {$nearTicks} ticks = {$nearOffset} 价格偏移 = {$nearPct}%\n";
-
-    // 2. 生成配置
     $configs = generate_configs(
-        $symbol,
-        $levels,
-        $totalUsdt,
-        $pid,
+        $args['symbol'],
+        $args['levels'],
+        $args['total_usdt'],
+        $args['pid'],
         $currentPrice,
         $exchangeInfo,
-        $orderBook,
-        $nearTicks,
-        $midTicks,
-        $farPct
+        $orderBook
     );
 
-    // 3. 输出摘要
-    print_header($symbol, $currentPrice, $pid, $levels, $totalUsdt, $depthRatio, count($configs), $tickSize, $nearTicks, $midTicks, $farPct);
-    print_table($configs, $levels, $currentPrice, $tickSize);
-    print_summary($configs, $currentPrice, $tickSize);
+    print_output($configs, $args['levels'], $currentPrice, $exchangeInfo['tickSize'],
+        $args['symbol'], $args['pid'], $args['total_usdt'], $args['depth_ratio']);
 
-    // 4. 生成 SQL
-    $safeSymbol = str_replace('/', '_', $symbol);
-    $sqlPath = $outputDir . '/' . $safeSymbol . '_pid' . $pid . '.sql';
+    $safeSymbol = str_replace('/', '_', $args['symbol']);
+    $sqlPath = $args['output_dir'] . '/' . $safeSymbol . '_pid' . $args['pid'] . '.sql';
     generate_sql($configs, $sqlPath);
 }
 
