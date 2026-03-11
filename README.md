@@ -1,175 +1,192 @@
-# AiAgentManage — 现货铺单配置生成器
+# 现货铺单配置生成器
 
-自动从币安公共 API 获取行情数据，按近盘 / 中盘 / 远盘三区域分配策略，生成 `spot_market_making_box` 表的多档位铺单参数，并导出可直接执行的 INSERT SQL 文件。
+## 项目简介
 
----
-
-## 功能特性
-
-- 实时拉取币安价格、tickSize/stepSize 精度信息和盘口深度（前 20 档）
-- 按 tick 数动态划分近盘（0~150 tick）/ 中盘（150~100000 tick）/ 远盘（>100000 tick）
-- 支持 1~N 档位，自动分配各区域 trust_num、change_trust_num、change_survival_time
-- `price_float` 以**百分比区间**字符串表示（如 `99.964-100.000`），买盘 50%~100%，卖盘 100%~150%
-- 生成 INSERT SQL 文件（写入 `output/` 目录）
+自动根据交易所精度 + 币安/Gate/KuCoin/Bitget 盘口深度，生成符合市场真实分布的铺单配置（INSERT + UPDATE SQL）。
 
 ---
 
-## 项目结构
+## 文件结构
 
 ```
-AiAgentManage/
-├── generate_box_config.py      # CLI 入口
-├── src/
-│   ├── binance_api.py          # 币安公共 REST API 封装
-│   ├── config_generator.py     # 铺单配置计算引擎
-│   └── output.py               # SQL 输出 & 控制台摘要
-├── tests/
-│   ├── conftest.py             # pytest fixtures（btc/eth/shib 模拟数据）
-│   ├── test_config_generator.py# 集成测试
-│   └── unit/
-│       └── test_config_generator.py  # 单元测试
-├── docs/
-│   └── spot_market_making_requirements.md  # 完整业务需求文档
-└── output/                     # 生成的 SQL 文件输出目录
+spot_market_making_box/
+├── generate_box_config.php   # 单个交易对生成
+├── batch_generate.php        # 批量生成（读 symbol.ini）
+├── symbol.ini                # 批量配置文件（pid => symbol）
+├── control_panel.php         # 控制面板（查看运行日志）
+├── output/                   # 生成的 SQL 文件目录
+│   ├── batch_all.sql         # 所有交易对汇总 SQL
+│   └── <symbol>_pid<pid>.sql # 单个交易对 SQL
+└── logs/
+    └── operations.log        # 操作日志（control_panel 读取）
 ```
 
 ---
 
-## 安装
+## 数据来源
 
-**环境要求：** Python 3.10+
+| 数据 | 来源 |
+|------|------|
+| 价格精度 (price_precision) | 本所 exchangeInfo API |
+| 数量精度 (number_precision) | 本所 exchangeInfo API |
+| 最小挂单量 (min_trade) | 本所 exchangeInfo API |
+| 参考价格 | 币安（回退：Gate → KuCoin → Bitget） |
+| 盘口深度 | 币安（回退：Gate → KuCoin → Bitget） |
+
+本所 API：
+```
+https://app.nn88zl.com/spot/read/pub/exchangeInfo?app_id=AwyOTFRlsfQ5mRkqwCNaEd5T
+```
+
+---
+
+## 铺单核心规则
+
+### 档位分布
+
+| 区域 | dom | 说明 |
+|------|-----|------|
+| 近盘 | 1-2 | 紧贴当前价，给用户看的盘口深度 |
+| 均分 | 3-9 | 承接大单，提供滑点保护 |
+
+### 价格区间
+
+- **总覆盖范围**：当前价 ±50%（卖方 100%~150%，买方 50%~100%）
+- **近盘宽度**：每档 = `当前价 × 2% ÷ tickSize` 个价格位（自动适配精度，上限100，下限5）
+- **均分区间**：`(50% - 近盘总宽度) ÷ 7` 均分到 dom3-9
+
+### 挂单量（number_float）
+
+**近盘（dom1-2）**：
+- 基于币安前5档深度统计
+- `min = 盘口最小档量 × 0.2`
+- `max = 盘口中位数（去最大值） × 0.2`
+- 近盘 max ≤ 均分 max（保证近盘不压过中远盘）
+
+**均分（dom3-9）**：
+- 基于币安前20档深度统计
+- `固定单 number_float = max×50% - max`
+- `变动单 change_number_float = max - max`（固定最大值）
+
+### 委托笔数（trust_num）
+
+- 总量：`--total_trust`（默认800，买卖各400）
+- 近盘：`nearTicks × 0.85`（填充率 ≥ 0.8）
+- 均分：`(单侧总量 - 近盘总量) ÷ 7`
+
+### 变动单配置
+
+| 字段 | 近盘 | 均分 |
+|------|------|------|
+| change_trust_num | 0（不变动） | 1（允许变动） |
+| change_survival_time | 3-10 秒 | 10-30 秒 |
+
+---
+
+## 使用方法
+
+### 单个生成
 
 ```bash
-git clone https://github.com/kary2999/spot_market_making_box.git
-cd spot_market_making_box
-pip install requests
-```
-
----
-
-## 使用说明
-
-### CLI 快速生成
-
-```bash
-python generate_box_config.py \
-  --symbol eth_usdt \
+php generate_box_config.php \
+  --symbol trx_usdt \
   --pid 3 \
   --levels 9 \
   --total_usdt 2000000 \
-  --depth_ratio 0.3
+  --depth_ratio 0.3 \
+  --total_trust 800
 ```
 
 **参数说明：**
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `--symbol` | 交易对，如 `eth_usdt`、`btc_usdt` | 必填 |
-| `--pid` | 项目 ID，写入 `spot_market_making_box.pid` | 必填 |
-| `--levels` | 每侧档位数 | `6` |
-| `--total_usdt` | 总量（USDT） | `1000000` |
-| `--depth_ratio` | 深度比，单边有效量 = total_usdt × depth_ratio / 2 | `0.2` |
-| `--output_dir` | SQL 输出目录 | `./output` |
+| --symbol | 交易对（必填） | - |
+| --pid | 项目 ID（必填） | - |
+| --levels | 每侧档位数 | 9 |
+| --total_usdt | 总资金量 USDT | 1000000 |
+| --depth_ratio | 深度比例 | 0.2 |
+| --total_trust | 买卖合计委托上限 | 800 |
+| --output_dir | SQL 输出目录 | ./output |
 
-**输出示例：**
-
-```
-[API] 正在获取 ETH_USDT 行情数据...
-[API] 参考价格: 3200.5  tickSize: 0.01
-────────────────────────────────────────────────────────────
-  交易对   : ETH/USDT  (参考价格: 3200.5)
-  pid      : 3   档位数: 9   总量: 2,000,000 USDT
-  深度比   : 0.3   远盘覆盖: 300.0%
-  单边有效量: 300,000 USDT
-  生成记录 : 18 条 (9 卖单 + 9 买单)
-────────────────────────────────────────────────────────────
-
-档位  区域  委托数  卖 price_float(%)            买 price_float(%)
-...
-[SQL] 已写入 output/eth_usdt_pid3.sql（18 条记录）
-```
-
-### Python API
-
-```python
-from src.binance_api import get_exchange_info, get_order_book, get_price
-from src.config_generator import generate_configs
-
-symbol = "eth_usdt"
-current_price = get_price(symbol)
-exchange_info  = get_exchange_info(symbol)   # {"tickSize": "0.01", "stepSize": "0.0001"}
-order_book     = get_order_book(symbol, limit=20)
-
-configs = generate_configs(
-    symbol=symbol,
-    levels=6,
-    total_usdt=1_000_000,
-    pid=1,
-    current_price=current_price,
-    exchange_info=exchange_info,
-    order_book=order_book,
-)
-
-for cfg in configs:
-    print(cfg["dom"], cfg["direction"], cfg["price_float"], cfg["trust_num"])
-```
-
----
-
-## 核心字段说明
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `pid` | int | 项目 ID |
-| `symbol` | str | 交易对，如 `eth_usdt` |
-| `direction` | int | `1` = 买盘，`-1` = 卖盘 |
-| `dom` | int | 档位序号，从 1 开始 |
-| `price_float` | str | 百分比区间，如 `99.964-100.000` |
-| `number_float` | str | 委托量浮动区间，如 `100-500` |
-| `trust_num` | int | 该档委托上限 |
-| `change_trust_num` | int | 是否允许动态调整（近盘=0，中/远盘=1） |
-| `change_survival_time` | str | 委托存活时间区间（近盘 `3-10`，中/远盘 `10-30`） |
-
----
-
-## 区域划分规则
-
-| 区域 | tick 数范围 | trust_num 倍率 | change_trust_num | change_survival_time |
-|------|-------------|---------------|-----------------|---------------------|
-| 近盘 | 0 ~ 150 | 0.4× | 0 | `3-10` |
-| 中盘 | 150 ~ 100000 | 0.8× | 1 | `10-30` |
-| 远盘 | > 100000 | 1.2× | 1 | `10-30` |
-
-- `≤6` 档：近盘 = dom1，远盘从第 4 档起，中盘居中
-- `>6` 档：近盘 = dom1-2，远盘 = 最后 2 档，中盘居中
-
----
-
-## 运行测试
+### 批量生成
 
 ```bash
-pytest tests/
+php batch_generate.php
+# 或指定配置文件
+php batch_generate.php --ini symbol.ini
 ```
 
-346 条测试全部通过（含 btc/eth/shib 模拟 fixture）。
+### symbol.ini 格式
+
+```ini
+[config]
+levels = 9
+total_usdt = 2000000
+depth_ratio = 0.3
+total_trust = 800
+output_dir = output
+
+[symbols]
+; pid = symbol
+3 = trx_usdt
+8 = sol_usdt
+14 = xrp_usdt
+```
 
 ---
 
-## 贡献指南
+## SQL 输出格式
 
-1. Fork 本仓库
-2. 创建功能分支：`git checkout -b feature/your-feature`
-3. 提交改动：`git commit -m "feat: 描述你的改动"`
-4. 推送分支：`git push origin feature/your-feature`
-5. 创建 Pull Request
+每个交易对生成两类 SQL：
 
-**代码规范：**
-- 遵循 PEP 8，注释全部用中文
-- 新功能须附带对应单元测试
-- commit message 使用约定式提交格式（`feat:` / `fix:` / `docs:` 等）
+**INSERT**（首次入库）：
+```sql
+INSERT INTO spot_market_making_box (box_id, pid, direction, dom, trust_num, ...)
+VALUES
+  (null, 3, -1, 1, 85, '100.000-100.348', ...),
+  ...;
+```
+
+**UPDATE**（更新参数）：
+```sql
+UPDATE spot_market_making_box
+SET trust_num = 85, price_float = '100.000-100.348', ...
+WHERE pid = 3 AND direction = -1 AND dom = 1;
+```
+
+- `direction = -1`：卖单
+- `direction = 1`：买单
+- `dom`：档位编号（1=最近盘）
 
 ---
 
-## 许可证
+## 多交易所回退逻辑
 
-MIT License
+```
+币安 → Gate.io → KuCoin → Bitget
+```
+
+若某交易所无此交易对（HTTP 400）自动跳转下一个，全部失败则该交易对标记为失败并跳过，不中断批量流程。
+
+---
+
+## 常见问题
+
+**Q: 为什么某些交易对生成失败？**
+- 本所有此交易对但所有行情交易所均无 → 需手动添加数据源
+
+**Q: 近盘价格位数怎么确定？**
+- 自动计算：`round(当前价 × 2% ÷ tickSize)`，范围 5-100
+- TRX（5位精度）≈ 100 ticks；SUSHI（3位精度）≈ 5 ticks
+
+**Q: 如何只更新部分参数？**
+- 直接执行生成的 UPDATE SQL 即可，按 pid+direction+dom 精准更新
+
+---
+
+## 依赖
+
+- PHP 7.3+
+- 扩展：`bcmath`、`curl`
+- 无需数据库，所有数据实时从 API 获取

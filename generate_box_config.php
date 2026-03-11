@@ -53,6 +53,35 @@ function calc_near_ticks($currentPrice, $tickSize)
     return $ticks;
 }
 
+// ==================== 操作日志 ====================
+
+define('LOG_FILE', __DIR__ . '/logs/operations.log');
+define('LOG_MAX_LINES', 500);
+
+function op_log($action, $detail = '', $status = 'OK')
+{
+    $dir = dirname(LOG_FILE);
+    if (!is_dir($dir)) {
+        mkdir($dir, 0755, true);
+    }
+
+    $line = json_encode(array(
+        'time'   => date('Y-m-d H:i:s'),
+        'ts'     => time(),
+        'action' => $action,
+        'detail' => $detail,
+        'status' => $status,
+    ), JSON_UNESCAPED_UNICODE) . "\n";
+
+    file_put_contents(LOG_FILE, $line, FILE_APPEND | LOCK_EX);
+
+    // 超过上限则截断保留最新
+    $lines = file(LOG_FILE);
+    if (count($lines) > LOG_MAX_LINES) {
+        file_put_contents(LOG_FILE, implode('', array_slice($lines, -LOG_MAX_LINES)));
+    }
+}
+
 // ==================== HTTP 请求 ====================
 
 function http_get($url)
@@ -87,6 +116,7 @@ function http_get($url)
  */
 function get_local_exchange_info($symbol)
 {
+    op_log('API_LOCAL', "GET exchangeInfo symbol={$symbol}");
     $data = http_get(EXCHANGE_INFO_URL);
 
     if (!isset($data['data']['symbols'])) {
@@ -247,11 +277,14 @@ function get_market_data($symbol, $limit = 20)
     $lastError = '';
     foreach ($exchanges as $name => $fns) {
         try {
+            op_log('API_MARKET', "GET {$name} price+depth symbol={$symbol}");
             $price     = call_user_func($fns[0], $symbol);
             $orderBook = call_user_func($fns[1], $symbol, $limit);
+            op_log('API_MARKET', "{$name} symbol={$symbol} price={$price}", 'OK');
             return array('price' => $price, 'orderBook' => $orderBook, 'source' => $name);
         } catch (Exception $e) {
             $lastError = "[{$name}] " . $e->getMessage();
+            op_log('API_MARKET', "{$name} symbol={$symbol} err=" . $e->getMessage(), 'FAIL');
         }
     }
 
@@ -552,6 +585,7 @@ function generate_sql($configs, $outputPath)
     }
 
     file_put_contents($outputPath, $sql);
+    op_log('SQL_WRITE', "file={$outputPath} rows=" . count($configs));
     echo "[输出] SQL: {$outputPath}\n";
 }
 

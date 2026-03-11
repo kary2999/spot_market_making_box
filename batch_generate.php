@@ -86,6 +86,7 @@ function batch_main()
     $batchSql     = "-- 批量铺单配置 生成时间: " . date('Y-m-d H:i:s') . "\n";
     $batchSql    .= "-- 共 {$total} 个交易对\n\n";
 
+    op_log('BATCH_START', "total={$total} levels={$levels} total_trust={$totalTrust}");
     echo sprintf(" %-6s %-20s %-10s %-8s %s\n", 'PID', '交易对', '状态', '耗时(s)', '说明');
     echo str_repeat('-', 70) . "\n";
 
@@ -154,6 +155,7 @@ function batch_main()
     }
 
     // 汇总
+    op_log('BATCH_END', "success={$success} failed=" . count($failed) . " total={$total}");
     echo str_repeat('=', 70) . "\n";
     echo sprintf(" 完成: %d/%d  失败: %d\n", $success, $total, count($failed));
     if (!$dryRun && $success > 0) {
