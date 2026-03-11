@@ -303,10 +303,14 @@ function generate_configs($symbol, $levels, $totalUsdt, $pid, $currentPrice, $lo
     // 买卖各占一半
     $oneSideTrust = (int)floor($totalTrust / 2);
 
-    // 中远盘：前20档统计，固定量（最大值-最大值）
-    $otherStats       = calc_depth_stats($orderBook, DEPTH_OTHER);
-    $otherMax         = format_qty(bcmul($otherStats['median'], '0.2', 20), $stepSize);
-    $otherNumberFloat = $otherMax . '-' . $otherMax;
+    // 中远盘：前20档统计
+    $otherStats = calc_depth_stats($orderBook, DEPTH_OTHER);
+    $otherMax   = format_qty(bcmul($otherStats['median'], '0.2', 20), $stepSize);
+    $otherMin   = format_qty(bcmul($otherMax, '0.5', 20), $stepSize);
+    // 固定单区间：最大值×50% - 最大值
+    $otherNumberFloat = $otherMin . '-' . $otherMax;
+    // 变动单固定量：最大值 - 最大值
+    $otherChangeFloat = $otherMax . '-' . $otherMax;
 
     // 近盘：前5档统计，随机区间，但 max 不超过中远盘 max
     $nearStats        = calc_depth_stats($orderBook, DEPTH_NEAR);
@@ -348,7 +352,7 @@ function generate_configs($symbol, $levels, $totalUsdt, $pid, $currentPrice, $lo
                 'price_float'           => $priceFloat,
                 'number_float'          => $isNear ? $nearNumberFloat : $otherNumberFloat,
                 'change_trust_num'      => $isNear ? 0 : 1,
-                'change_number_float'   => $isNear ? $nearNumberFloat : $otherNumberFloat,
+                'change_number_float'   => $isNear ? $nearNumberFloat : $otherChangeFloat,
                 'change_survival_time'  => $isNear ? '3-10' : '10-30',
                 'status'                => 1,
                 '_symbol'               => $symbol,
