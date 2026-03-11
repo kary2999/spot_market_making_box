@@ -18,10 +18,12 @@ bcscale(20);
 define('BINANCE_BASE_URL', 'https://api.binance.com');
 define('REQUEST_TIMEOUT', 10);
 
-// 近盘覆盖的 tick 数
-define('NEAR_TICKS', 100);
+// 近盘每档覆盖的 tick 数（每个 dom 100 个价格位）
+define('NEAR_TICKS_PER_DOM', 100);
 
-// 近盘档位数（levels>6 时 2 档，否则 1 档）
+// 近盘填充率：trust_num / ticks >= 0.85
+define('NEAR_FILL_RATE', 0.85);
+
 // 盘口取深度档位（用于计算 number_float）
 define('DEPTH_NEAR', 5);
 define('DEPTH_OTHER', 20);
@@ -170,8 +172,9 @@ function make_number_float($avgQty, $stepSize)
  */
 function build_price_ranges($currentPrice, $tickSize, $levels, $direction, $nearLevels)
 {
-    // 近盘百分比宽度 = NEAR_TICKS × tickSize / currentPrice × 100
-    $nearOffset = bcmul((string)NEAR_TICKS, $tickSize, 20);
+    // 近盘每档 NEAR_TICKS_PER_DOM 个 tick
+    $totalNearTicks = NEAR_TICKS_PER_DOM * $nearLevels;
+    $nearOffset = bcmul((string)$totalNearTicks, $tickSize, 20);
     $nearPctWidth = bcdiv(bcmul($nearOffset, '100', 10), $currentPrice, 10);
 
     // 总范围 50%
@@ -237,9 +240,9 @@ function generate_configs($symbol, $levels, $totalUsdt, $pid, $currentPrice, $ex
     $nearNumberFloat  = make_number_float($nearDepthQty, $stepSize);
     $otherNumberFloat = make_number_float($otherDepthQty, $stepSize);
 
-    // 近盘 trust_num：总量的 15%，均分给近盘档位
-    $nearTrustTotal = max(1, (int)round($totalTrust * 0.15));
-    $nearTrustPerDom = max(1, (int)round($nearTrustTotal / $nearLevels));
+    // 近盘 trust_num = 每档 tick 数 × 填充率（确保 笔数/价格位 >= 0.85）
+    $nearTrustPerDom = max(1, (int)round(NEAR_TICKS_PER_DOM * NEAR_FILL_RATE));
+    $nearTrustTotal = $nearTrustPerDom * $nearLevels;
 
     // 剩余 trust_num：均分给中远盘
     $remainTrustTotal = $totalTrust - $nearTrustTotal;
@@ -348,7 +351,9 @@ function ticks_count($priceFloatPct, $refPrice, $tickSize)
 
 function print_output($configs, $levels, $currentPrice, $tickSize, $symbol, $pid, $totalUsdt, $depthRatio)
 {
-    $nearOffset = bcmul((string)NEAR_TICKS, $tickSize, 10);
+    $nearLevels = ($levels > 6) ? 2 : 1;
+    $totalNearTicks = NEAR_TICKS_PER_DOM * $nearLevels;
+    $nearOffset = bcmul((string)$totalNearTicks, $tickSize, 10);
     $nearPct    = bcdiv(bcmul($nearOffset, '100', 10), $currentPrice, 4);
     $symbolDisplay = strtoupper(str_replace('_', '/', $symbol));
     $pricePlaces   = decimal_places($tickSize);
@@ -357,7 +362,9 @@ function print_output($configs, $levels, $currentPrice, $tickSize, $symbol, $pid
     $sep = str_repeat('-', 70);
     echo "\n{$sep}\n";
     echo "  交易对   : {$symbolDisplay}  (当前价: {$currentPrice})\n";
-    echo "  tickSize : {$tickSize} ({$pricePlaces}位)   近盘: " . NEAR_TICKS . " ticks = {$nearOffset} ({$nearPct}%)\n";
+    $fillRate = NEAR_FILL_RATE * 100;
+    echo "  tickSize : {$tickSize} ({$pricePlaces}位)   近盘: 每档" . NEAR_TICKS_PER_DOM . "ticks × {$nearLevels}档 = {$totalNearTicks}ticks ({$nearPct}%)\n";
+    echo "  近盘填充率: {$fillRate}%   trust_num/ticks = " . (int)round(NEAR_TICKS_PER_DOM * NEAR_FILL_RATE) . "/" . NEAR_TICKS_PER_DOM . "\n";
     echo sprintf("  pid: %d   levels: %d   total: %s USDT   depth_ratio: %.1f\n", $pid, $levels, number_format($totalUsdt, 0), $depthRatio);
     echo "{$sep}\n\n";
 
@@ -373,9 +380,9 @@ function print_output($configs, $levels, $currentPrice, $tickSize, $symbol, $pid
     }
 
     // 表格
-    echo sprintf(" %-3s %-6s %6s %6s %6s  %-22s  %-22s  %-16s\n",
-        'dom', '区域', '笔数', 'ticks', '宽度%', '卖价区间', '买价区间', '数量区间');
-    echo str_repeat('-', 105) . "\n";
+    echo sprintf(" %-3s %-6s %6s %6s %7s %6s  %-22s  %-22s  %-16s\n",
+        'dom', '区域', '笔数', 'ticks', '笔/tick', '宽度%', '卖价区间', '买价区间', '数量区间');
+    echo str_repeat('-', 115) . "\n";
 
     $zoneCn = array('near' => '近盘', 'other' => '均分');
 
@@ -389,11 +396,12 @@ function print_output($configs, $levels, $currentPrice, $tickSize, $symbol, $pid
         $sellPf    = isset($sc['price_float']) ? $sc['price_float'] : '-';
         $buyPf     = isset($bc['price_float']) ? $bc['price_float'] : '-';
         $numFloat  = isset($sc['number_float']) ? $sc['number_float'] : '-';
-        $ticks     = $sellPf !== '-' ? ticks_count($sellPf, $currentPrice, $tickSize) : '-';
+        $ticks     = $sellPf !== '-' ? ticks_count($sellPf, $currentPrice, $tickSize) : 0;
         $width     = $sellPf !== '-' ? pct_width($sellPf) : '-';
+        $fillRatio = $ticks > 0 ? sprintf('%.2f', $trustNum / $ticks) : '-';
 
-        echo sprintf(" %-3d %-6s %6s %6s %6s  %-22s  %-22s  %-16s\n",
-            $dom, $zoneLabel, $trustNum, $ticks, $width, $sellPf, $buyPf, $numFloat);
+        echo sprintf(" %-3d %-6s %6s %6s %7s %6s  %-22s  %-22s  %-16s\n",
+            $dom, $zoneLabel, $trustNum, $ticks, $fillRatio, $width, $sellPf, $buyPf, $numFloat);
     }
     echo "\n";
 
