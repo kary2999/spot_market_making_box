@@ -598,4 +598,7 @@ function main()
     generate_sql($configs, $sqlPath);
 }
 
-main();
+// 只在直接执行时运行，require 时不执行
+if (basename(__FILE__) === basename($_SERVER['SCRIPT_FILENAME'])) {
+    main();
+}
