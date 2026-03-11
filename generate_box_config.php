@@ -317,6 +317,27 @@ function generate_sql($configs, $outputPath)
     $sql = "INSERT INTO spot_market_making_box (" . implode(', ', $fields) . ")\nVALUES\n"
          . implode(",\n", $rows) . ";\n";
 
+    // UPDATE 语句：按 pid + direction + dom 更新每档
+    $sql .= "\n-- UPDATE 语句（按 pid + direction + dom 逐档更新）\n";
+    foreach ($configs as $c) {
+        $sets = array();
+        foreach ($fields as $f) {
+            if ($f === 'box_id' || $f === 'pid' || $f === 'direction' || $f === 'dom') {
+                continue;
+            }
+            $v = $c[$f];
+            if ($v === null) {
+                $sets[] = "{$f} = null";
+            } elseif (in_array($f, $strFields)) {
+                $sets[] = "{$f} = '" . preg_replace('/[^0-9.\-]/', '', (string)$v) . "'";
+            } else {
+                $sets[] = "{$f} = " . (int)$v;
+            }
+        }
+        $sql .= "UPDATE spot_market_making_box SET " . implode(', ', $sets)
+              . " WHERE pid = {$c['pid']} AND direction = {$c['direction']} AND dom = {$c['dom']};\n";
+    }
+
     file_put_contents($outputPath, $sql);
     echo "[输出] SQL: {$outputPath}\n";
 }
