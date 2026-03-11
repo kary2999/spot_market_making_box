@@ -10,7 +10,7 @@
  *
  * 用法:
  *   php generate_box_config.php --symbol trx_usdt --pid 3 --levels 9 \
- *       --total_usdt 2000000 --depth_ratio 0.3
+ *       --total_usdt 2000000 --depth_ratio 0.3 --tick_size 0.00001
  */
 
 bcscale(20);
@@ -424,10 +424,19 @@ function parse_args()
 {
     $opts = getopt('', array(
         'symbol:', 'pid:', 'levels:', 'total_usdt:', 'depth_ratio:', 'output_dir:',
+        'tick_size:',
     ));
 
     if (empty($opts['symbol']) || !isset($opts['pid'])) {
-        echo "用法: php generate_box_config.php --symbol trx_usdt --pid 3 --levels 9 --total_usdt 2000000 --depth_ratio 0.3\n";
+        echo "用法: php generate_box_config.php --symbol trx_usdt --pid 3 --levels 9 \\\n";
+        echo "      --total_usdt 2000000 --depth_ratio 0.3 --tick_size 0.00001\n\n";
+        echo "  --tick_size  本交易所价格精度（必填，如 0.00001=5位, 0.01=2位）\n";
+        exit(1);
+    }
+
+    if (empty($opts['tick_size'])) {
+        fwrite(STDERR, "[错误] 必须指定 --tick_size（你们交易所的价格精度）\n");
+        fwrite(STDERR, "       例如 5位精度: --tick_size 0.00001\n");
         exit(1);
     }
 
@@ -438,6 +447,7 @@ function parse_args()
         'total_usdt'  => isset($opts['total_usdt']) ? (float)$opts['total_usdt'] : 1000000.0,
         'depth_ratio' => isset($opts['depth_ratio']) ? (float)$opts['depth_ratio'] : 0.2,
         'output_dir'  => isset($opts['output_dir']) ? $opts['output_dir'] : 'output',
+        'tick_size'   => $opts['tick_size'],
     );
 }
 
@@ -456,7 +466,12 @@ function main()
         exit(1);
     }
 
-    echo "[API] 价格: {$currentPrice}  tickSize: {$exchangeInfo['tickSize']}  stepSize: {$exchangeInfo['stepSize']}\n";
+    // 使用用户指定的 tick_size（本交易所精度），而不是币安的
+    $tickSize = $args['tick_size'];
+    $exchangeInfo['tickSize'] = $tickSize;
+
+    echo "[API] 价格: {$currentPrice}  币安tickSize: {$exchangeInfo['tickSize']}  本所tickSize: {$tickSize}\n";
+    echo "[INFO] 价格精度: " . decimal_places($tickSize) . " 位  最小步长: {$tickSize}\n";
 
     $configs = generate_configs(
         $args['symbol'],
@@ -468,7 +483,7 @@ function main()
         $orderBook
     );
 
-    print_output($configs, $args['levels'], $currentPrice, $exchangeInfo['tickSize'],
+    print_output($configs, $args['levels'], $currentPrice, $tickSize,
         $args['symbol'], $args['pid'], $args['total_usdt'], $args['depth_ratio']);
 
     $safeSymbol = str_replace('/', '_', $args['symbol']);
