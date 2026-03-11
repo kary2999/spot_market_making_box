@@ -23,8 +23,12 @@ define('BINANCE_BASE_URL', 'https://api.binance.com');
 define('EXCHANGE_INFO_URL', 'https://app.nn88zl.com/spot/read/pub/exchangeInfo?app_id=AwyOTFRlsfQ5mRkqwCNaEd5T');
 define('REQUEST_TIMEOUT', 10);
 
-// 近盘每档覆盖的价格位数
-define('NEAR_TICKS_PER_DOM', 100);
+// 近盘每档目标覆盖比例（当前价的 2%）
+define('NEAR_PCT_PER_DOM', 0.02);
+// 近盘每档最多 tick 数上限
+define('NEAR_TICKS_MAX', 100);
+// 近盘每档最少 tick 数下限
+define('NEAR_TICKS_MIN', 5);
 
 // 近盘填充率：trust_num / ticks >= 0.85
 define('NEAR_FILL_RATE', 0.85);
@@ -32,6 +36,17 @@ define('NEAR_FILL_RATE', 0.85);
 // 盘口取深度档位（用于计算 number_float）
 define('DEPTH_NEAR', 5);
 define('DEPTH_OTHER', 20);
+
+/**
+ * 自动计算近盘每档 tick 数
+ * 目标：约为当前价的 NEAR_PCT_PER_DOM（2%），不超过上限也不低于下限
+ */
+function calc_near_ticks($currentPrice, $tickSize)
+{
+    $ticks = (int)round((float)$currentPrice * NEAR_PCT_PER_DOM / (float)$tickSize);
+    $ticks = max(NEAR_TICKS_MIN, min(NEAR_TICKS_MAX, $ticks));
+    return $ticks;
+}
 
 // ==================== HTTP 请求 ====================
 
@@ -250,9 +265,9 @@ function make_other_number_float($medianQty, $stepSize, $ratio)
 
 // ==================== 核心：价格区间 ====================
 
-function build_price_ranges($currentPrice, $tickSize, $levels, $direction, $nearLevels)
+function build_price_ranges($currentPrice, $tickSize, $levels, $direction, $nearLevels, $nearTicksPerDom)
 {
-    $totalNearTicks = NEAR_TICKS_PER_DOM * $nearLevels;
+    $totalNearTicks = $nearTicksPerDom * $nearLevels;
     $nearOffset = bcmul((string)$totalNearTicks, $tickSize, 20);
     $nearPctWidth = bcdiv(bcmul($nearOffset, '100', 10), $currentPrice, 10);
 
@@ -297,8 +312,9 @@ function generate_configs($symbol, $levels, $totalUsdt, $pid, $currentPrice, $lo
     $tickSize = $localInfo['tickSize'];
     $stepSize = $localInfo['stepSize'];
 
-    $nearLevels = ($levels > 6) ? 2 : 1;
-    $remainLevels = $levels - $nearLevels;
+    $nearLevels     = ($levels > 6) ? 2 : 1;
+    $nearTicksPerDom = calc_near_ticks($currentPrice, $tickSize);
+    $remainLevels   = $levels - $nearLevels;
 
     // 买卖各占一半
     $oneSideTrust = (int)floor($totalTrust / 2);
@@ -315,11 +331,11 @@ function generate_configs($symbol, $levels, $totalUsdt, $pid, $currentPrice, $lo
     // 近盘：前5档统计，随机区间，但 max 不超过中远盘 max
     $nearStats        = calc_depth_stats($orderBook, DEPTH_NEAR);
     $nearNumberFloat  = make_near_number_float(
-        $nearStats['median'], $nearStats['min'], $stepSize, '0.08', $otherMax
+        $nearStats['median'], $nearStats['min'], $stepSize, '0.2', $otherMax
     );
 
-    // 近盘 trust_num = tick数 × 填充率（但不超过单侧总量的 30%）
-    $nearTrustPerDom = max(1, (int)round(NEAR_TICKS_PER_DOM * NEAR_FILL_RATE));
+    // 近盘 trust_num = 动态tick数 × 填充率
+    $nearTrustPerDom = max(1, (int)round($nearTicksPerDom * NEAR_FILL_RATE));
     $nearTrustTotal  = $nearTrustPerDom * $nearLevels;
 
     // 如果近盘超出单侧总量，等比压缩
@@ -334,7 +350,7 @@ function generate_configs($symbol, $levels, $totalUsdt, $pid, $currentPrice, $lo
     $configs = array();
 
     foreach (array(-1, 1) as $direction) {
-        $priceRanges = build_price_ranges($currentPrice, $tickSize, $levels, $direction, $nearLevels);
+        $priceRanges = build_price_ranges($currentPrice, $tickSize, $levels, $direction, $nearLevels, $nearTicksPerDom);
 
         for ($dom = 1; $dom <= $levels; $dom++) {
             $isNear = ($dom <= $nearLevels);
@@ -449,12 +465,13 @@ function pct_to_actual($priceFloatPct, $refPrice, $pricePrecision)
 
 function print_output($configs, $levels, $currentPrice, $localInfo, $symbol, $pid, $totalUsdt, $depthRatio, $totalTrust)
 {
-    $tickSize       = $localInfo['tickSize'];
-    $pricePrecision = $localInfo['price_precision'];
-    $nearLevels     = ($levels > 6) ? 2 : 1;
-    $totalNearTicks = NEAR_TICKS_PER_DOM * $nearLevels;
-    $nearOffset     = bcmul((string)$totalNearTicks, $tickSize, 10);
-    $nearPct        = bcdiv(bcmul($nearOffset, '100', 10), $currentPrice, 4);
+    $tickSize        = $localInfo['tickSize'];
+    $pricePrecision  = $localInfo['price_precision'];
+    $nearLevels      = ($levels > 6) ? 2 : 1;
+    $nearTicksPerDom = calc_near_ticks($currentPrice, $tickSize);
+    $totalNearTicks  = $nearTicksPerDom * $nearLevels;
+    $nearOffset      = bcmul((string)$totalNearTicks, $tickSize, 10);
+    $nearPct         = bcdiv(bcmul($nearOffset, '100', 10), $currentPrice, 4);
     $symbolDisplay  = strtoupper(str_replace('_', '/', $symbol));
 
     $sep = str_repeat('-', 75);
@@ -464,8 +481,8 @@ function print_output($configs, $levels, $currentPrice, $localInfo, $symbol, $pi
     echo "  最小挂单量 : {$localInfo['min_trade']}   最大: {$localInfo['max_trade']}\n";
     echo sprintf("  pid: %d   levels: %d   total: %s USDT\n", $pid, $levels, number_format($totalUsdt, 0));
     echo sprintf("  委托上限   : 买卖合计 %d 单（单侧 %d）\n", $totalTrust, (int)floor($totalTrust / 2));
-    echo "  近盘: 每档 " . NEAR_TICKS_PER_DOM . " 价格位 × {$nearLevels} 档 = {$totalNearTicks} 价格位 ({$nearPct}%)\n";
-    echo "  填充率: " . (NEAR_FILL_RATE * 100) . "% → trust_num = " . (int)round(NEAR_TICKS_PER_DOM * NEAR_FILL_RATE) . "\n";
+    echo "  近盘: 每档 {$nearTicksPerDom} 价格位 × {$nearLevels} 档 = {$totalNearTicks} 价格位 ({$nearPct}%)\n";
+    echo "  填充率: " . (NEAR_FILL_RATE * 100) . "% → trust_num = " . (int)round($nearTicksPerDom * NEAR_FILL_RATE) . "\n";
     echo "{$sep}\n\n";
 
     // 分组
