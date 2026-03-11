@@ -55,7 +55,8 @@ function calc_near_ticks($currentPrice, $tickSize)
 
 // ==================== 操作日志 ====================
 
-define('LOG_FILE', __DIR__ . '/logs/operations.log');
+define('LOG_FILE',      __DIR__ . '/logs/operations.log');
+define('LOG_FILE_WEB',  '/var/www/html/dashboard/logs/operations.log');
 define('LOG_MAX_LINES', 500);
 
 function op_log($action, $detail = '', $status = 'OK')
@@ -74,11 +75,14 @@ function op_log($action, $detail = '', $status = 'OK')
     ), JSON_UNESCAPED_UNICODE) . "\n";
 
     file_put_contents(LOG_FILE, $line, FILE_APPEND | LOCK_EX);
+    @file_put_contents(LOG_FILE_WEB, $line, FILE_APPEND | LOCK_EX);
 
     // 超过上限则截断保留最新
     $lines = file(LOG_FILE);
     if (count($lines) > LOG_MAX_LINES) {
-        file_put_contents(LOG_FILE, implode('', array_slice($lines, -LOG_MAX_LINES)));
+        $trimmed = implode('', array_slice($lines, -LOG_MAX_LINES));
+        file_put_contents(LOG_FILE, $trimmed);
+        @file_put_contents(LOG_FILE_WEB, $trimmed);
     }
 }
 

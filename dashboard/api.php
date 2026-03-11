@@ -3,13 +3,14 @@ header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Cache-Control: no-cache');
 
-define('BASE_DIR',    dirname(__DIR__));
+define('BASE_DIR', '/var/www/html/dashboard');
 define('LOG_FILE',    BASE_DIR . '/logs/operations.log');
 define('AI_ACT_LOG',  BASE_DIR . '/logs/ai_activity.log');
 define('OUTPUT_DIR',  BASE_DIR . '/output');
 define('AI_COST_LOG', BASE_DIR . '/logs/ai_cost.json');
 define('RUN_LOG',     BASE_DIR . '/logs/run_output.log');
-define('PID_FILE',    BASE_DIR . '/logs/run.pid');
+define('RUN_LOG_SRC', '/root/ai0309/spot_market_making_box/logs/run_output.log');
+define('PID_FILE',    '/var/www/html/dashboard/logs/run.pid');
 
 $action = isset($_GET['action']) ? $_GET['action'] : 'stats';
 
@@ -95,7 +96,7 @@ elseif ($action === 'run') {
     if (file_exists(PID_FILE)) { $pid = trim(file_get_contents(PID_FILE)); if ($pid && file_exists("/proc/{$pid}")) { echo json_encode(['ok'=>false,'msg'=>'任务正在运行中']); exit; } }
     @file_put_contents(RUN_LOG, "");
     $php = '/usr/bin/php8.3'; $script = BASE_DIR.'/batch_generate.php'; $ini = BASE_DIR.'/symbol.ini';
-    $cmd = "{$php} {$script} --ini ".escapeshellarg($ini)." > ".escapeshellarg(RUN_LOG)." 2>&1 & echo \$!";
+    $cmd = "{$php} {$script} --ini ".escapeshellarg($ini)." > ".escapeshellarg('/var/www/html/dashboard/logs/run_output.log')." 2>&1 & echo \$!";
     $pid = trim(shell_exec($cmd));
     file_put_contents(PID_FILE, $pid);
     echo json_encode(['ok'=>true,'pid'=>$pid,'msg'=>'批量任务已启动']);

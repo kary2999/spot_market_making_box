@@ -13,8 +13,9 @@
  * 类型: CMD FILE HTTP GIT MSG THINK
  */
 
-define('AI_ACT_LOG', __DIR__ . '/logs/ai_activity.log');
-define('LOG_MAX',    1000);
+define('AI_ACT_LOG',     __DIR__ . '/logs/ai_activity.log');
+define('AI_ACT_LOG_WEB', '/var/www/html/dashboard/logs/ai_activity.log');
+define('LOG_MAX',        1000);
 
 function ai_log($type, $what, $detail = '')
 {
@@ -30,10 +31,13 @@ function ai_log($type, $what, $detail = '')
     ], JSON_UNESCAPED_UNICODE) . "\n";
 
     file_put_contents(AI_ACT_LOG, $entry, FILE_APPEND | LOCK_EX);
+    @file_put_contents(AI_ACT_LOG_WEB, $entry, FILE_APPEND | LOCK_EX);
 
     $lines = file(AI_ACT_LOG);
     if (count($lines) > LOG_MAX) {
-        file_put_contents(AI_ACT_LOG, implode('', array_slice($lines, -LOG_MAX)));
+        $trimmed = implode('', array_slice($lines, -LOG_MAX));
+        file_put_contents(AI_ACT_LOG, $trimmed);
+        @file_put_contents(AI_ACT_LOG_WEB, $trimmed);
     }
 }
 
