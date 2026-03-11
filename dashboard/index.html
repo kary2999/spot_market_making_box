@@ -3,102 +3,103 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>铺单控制面板</title>
+<title>小聋女行为监控</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;min-height:100vh}
+body{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:13px}
 
-/* ── 顶栏 ── */
-.topbar{
-  background:#161b22;border-bottom:1px solid #30363d;
-  padding:12px 14px;display:flex;align-items:center;justify-content:space-between;
-  position:sticky;top:0;z-index:100;
-}
-.topbar-left h1{font-size:16px;color:#58a6ff;font-weight:700;letter-spacing:.5px}
-.topbar-left .sub{font-size:11px;color:#484f58;margin-top:2px}
-
-.ai-box{
-  background:#0d1117;border:1px solid #30363d;border-radius:10px;
-  padding:8px 12px;text-align:right;min-width:120px;
-}
+.topbar{background:#161b22;border-bottom:1px solid #30363d;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
+.topbar h1{font-size:15px;color:#e3b341;font-weight:700}
+.topbar .sub{font-size:10px;color:#484f58;margin-top:2px}
+.ai-box{background:#0d1117;border:1px solid #30363d;border-radius:10px;padding:8px 12px;text-align:right}
 .ai-box .lbl{font-size:10px;color:#8b949e}
-.ai-box .cost{font-size:18px;font-weight:700;color:#3fb950}
+.ai-box .cost{font-size:17px;font-weight:700;color:#3fb950}
 .ai-box .tk{font-size:10px;color:#8b949e}
-.ai-box .mdl{font-size:10px;color:#484f58;margin-top:1px}
 
-/* ── 统计格子 ── */
-.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:12px}
-.card{background:#161b22;border:1px solid #21262d;border-radius:10px;padding:12px 8px;text-align:center}
-.card .n{font-size:24px;font-weight:700;color:#58a6ff}
-.card .l{font-size:11px;color:#8b949e;margin-top:3px}
-.card.g .n{color:#3fb950}
-.card.r .n{color:#f85149}
-.card.y .n{color:#e3b341}
-
-/* ── 按钮区 ── */
-.action-bar{padding:0 12px 12px;display:flex;gap:8px}
-.btn{
-  flex:1;padding:11px 0;border-radius:8px;border:none;cursor:pointer;
-  font-size:14px;font-weight:600;transition:.15s
-}
-.btn-run{background:#238636;color:#fff}
-.btn-run:hover{background:#2ea043}
-.btn-run:disabled{background:#21262d;color:#484f58;cursor:not-allowed}
-.btn-stop{background:#da3633;color:#fff}
-.btn-clear{background:#21262d;color:#8b949e;flex:0 0 80px}
-
-/* ── 分隔标题 ── */
-.sec{padding:6px 12px 4px;font-size:11px;color:#8b949e;letter-spacing:1px;text-transform:uppercase;border-top:1px solid #21262d;display:flex;align-items:center;justify-content:space-between}
-.dot-live{width:7px;height:7px;border-radius:50%;background:#3fb950;display:inline-block;animation:blink 1.5s infinite;margin-right:4px}
+/* AI 状态横幅 */
+.ai-status{background:#161b22;border:1px solid #30363d;border-radius:10px;margin:10px 12px 0;padding:10px 14px;display:flex;align-items:center;gap:10px}
+.ai-avatar{font-size:28px;line-height:1}
+.ai-info{flex:1}
+.ai-name{font-size:13px;font-weight:700;color:#e3b341}
+.ai-doing{font-size:12px;color:#c9d1d9;margin-top:2px;min-height:18px}
+.ai-dot{width:8px;height:8px;border-radius:50%;background:#3fb950;flex-shrink:0}
+.ai-dot.idle{background:#484f58}
+.ai-dot.active{animation:blink 1s infinite}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
 
-/* ── 输出终端 ── */
-.terminal{
-  background:#010409;border:1px solid #21262d;border-radius:8px;
-  margin:0 12px 12px;padding:10px;
-  font-family:'SF Mono','Fira Code',monospace;font-size:12px;
-  height:220px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;
-  color:#8b949e;
-}
-.terminal .ok   {color:#3fb950}
-.terminal .fail {color:#f85149}
-.terminal .head {color:#58a6ff}
-.terminal .sep  {color:#30363d}
+/* 统计 */
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:10px 12px}
+.card{background:#161b22;border:1px solid #21262d;border-radius:10px;padding:10px 6px;text-align:center}
+.card .n{font-size:22px;font-weight:700;color:#58a6ff}
+.card .l{font-size:10px;color:#8b949e;margin-top:3px}
+.card.g .n{color:#3fb950} .card.r .n{color:#f85149} .card.y .n{color:#e3b341}
 
-/* ── 操作日志 ── */
+/* 按钮 */
+.action-bar{padding:0 12px 10px;display:flex;gap:8px}
+.btn{flex:1;padding:10px 0;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:600;transition:.15s}
+.btn-run{background:#238636;color:#fff}.btn-run:hover{background:#2ea043}.btn-run:disabled{background:#21262d;color:#484f58;cursor:not-allowed}
+.btn-clear{background:#21262d;color:#8b949e;flex:0 0 72px}
+
+/* 分区标题 */
+.sec{padding:6px 12px 4px;font-size:10px;color:#8b949e;letter-spacing:1px;text-transform:uppercase;border-top:1px solid #21262d;display:flex;align-items:center;justify-content:space-between}
+.dot{width:6px;height:6px;border-radius:50%;display:inline-block;margin-right:5px}
+.dot.on{background:#3fb950;animation:blink 1s infinite}.dot.off{background:#484f58}
+
+/* 终端 */
+.terminal{background:#010409;border:1px solid #21262d;border-radius:8px;margin:0 12px 10px;padding:10px;font-family:'SF Mono','Fira Code',monospace;font-size:11px;height:180px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;color:#8b949e}
+.terminal .ok{color:#3fb950}.terminal .fail{color:#f85149}.terminal .head{color:#58a6ff}.terminal .sep{color:#21262d}
+
+/* AI 行为日志 */
+.ai-log-wrap{padding:0 12px 10px}
+.ai-log-item{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:9px 12px;margin-bottom:6px}
+.ai-log-meta{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.ai-log-type{display:inline-block;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700}
+.type-CMD   {background:#1a3a2a;color:#3fb950}
+.type-FILE  {background:#1f3a5c;color:#58a6ff}
+.type-HTTP  {background:#2d1f5c;color:#d2a8ff}
+.type-GIT   {background:#3a2a0a;color:#e3b341}
+.type-THINK {background:#1a1a2a;color:#8b949e}
+.type-MSG   {background:#2a1a2a;color:#ff79c6}
+.ai-log-time{font-size:10px;color:#484f58;margin-left:auto}
+.ai-log-what{font-size:12px;color:#c9d1d9}
+.ai-log-detail{font-size:11px;color:#8b949e;margin-top:3px;word-break:break-all}
+
+/* 操作日志（脚本级）*/
 .log-wrap{padding:0 12px 16px;overflow-x:auto}
-.log-table{width:100%;border-collapse:collapse;font-size:12px}
-.log-table td{padding:6px 6px;border-bottom:1px solid #21262d;vertical-align:top}
-.log-table tr:hover td{background:#161b22}
-.tag{display:inline-block;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;white-space:nowrap}
-.tag-API_LOCAL   {background:#1f3a5c;color:#58a6ff}
-.tag-API_MARKET  {background:#1f3a5c;color:#79c0ff}
-.tag-SQL_WRITE   {background:#2d1f5c;color:#d2a8ff}
-.tag-BATCH_START {background:#1a3a2a;color:#3fb950}
-.tag-BATCH_END   {background:#1a3a2a;color:#56d364}
-.status-ok  {color:#3fb950}
-.status-fail{color:#f85149;font-weight:700}
-.tcol{color:#8b949e;font-size:11px;white-space:nowrap}
-.dcol{color:#c9d1d9;word-break:break-all}
+.log-table{width:100%;border-collapse:collapse;font-size:11px}
+.log-table td{padding:5px 5px;border-bottom:1px solid #21262d;vertical-align:top}
+.tag{display:inline-block;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:700;white-space:nowrap}
+.tag-API_LOCAL{background:#1f3a5c;color:#58a6ff}.tag-API_MARKET{background:#1f3a5c;color:#79c0ff}
+.tag-SQL_WRITE{background:#2d1f5c;color:#d2a8ff}.tag-BATCH_START{background:#1a3a2a;color:#3fb950}.tag-BATCH_END{background:#1a3a2a;color:#56d364}
+.ok-s{color:#3fb950}.fail-s{color:#f85149;font-weight:700}
+.tcol{color:#484f58;font-size:10px;white-space:nowrap}.dcol{color:#c9d1d9;word-break:break-all}
 
-.empty{color:#484f58;text-align:center;padding:24px;font-size:13px}
-.footer{padding:10px 12px;color:#484f58;font-size:11px;display:flex;justify-content:space-between;border-top:1px solid #21262d}
+.footer{padding:8px 12px;color:#484f58;font-size:10px;display:flex;justify-content:space-between;border-top:1px solid #21262d}
+.empty{color:#484f58;text-align:center;padding:20px;font-size:12px}
 </style>
 </head>
 <body>
 
-<!-- 顶栏 -->
 <div class="topbar">
-  <div class="topbar-left">
-    <h1>📊 铺单控制面板</h1>
+  <div>
+    <h1>🙉 小聋女行为监控</h1>
     <div class="sub" id="srv-time">--</div>
   </div>
   <div class="ai-box">
-    <div class="lbl">🤖 AI 费用</div>
+    <div class="lbl">💰 AI 费用</div>
     <div class="cost" id="ai-cost">$0.0000</div>
     <div class="tk" id="ai-tk">-- tokens</div>
-    <div class="mdl" id="ai-mdl">--</div>
   </div>
+</div>
+
+<!-- AI 状态 -->
+<div class="ai-status">
+  <div class="ai-avatar">🙉</div>
+  <div class="ai-info">
+    <div class="ai-name">小聋女</div>
+    <div class="ai-doing" id="ai-doing">等待指令...</div>
+  </div>
+  <div class="ai-dot idle" id="ai-dot"></div>
 </div>
 
 <!-- 统计 -->
@@ -107,218 +108,189 @@ body{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemFo
   <div class="card r"><div class="n" id="s-fail">—</div><div class="l">API 失败</div></div>
   <div class="card y"><div class="n" id="s-sym">—</div><div class="l">已生成交易对</div></div>
   <div class="card" ><div class="n" id="s-sql">—</div><div class="l">SQL 写入</div></div>
-  <div class="card" ><div class="n" id="s-batch">—</div><div class="l">批量运行</div></div>
+  <div class="card" ><div class="n" id="s-batch">—</div><div class="l">批量运行次数</div></div>
   <div class="card" ><div class="n" id="s-files">—</div><div class="l">SQL 文件数</div></div>
 </div>
 
 <!-- 按钮 -->
 <div class="action-bar">
   <button class="btn btn-run" id="btn-run" onclick="startRun()">▶ 运行批量生成</button>
-  <button class="btn btn-clear" onclick="clearLog()">清空日志</button>
+  <button class="btn btn-clear" onclick="clearOutputLog()">清空</button>
 </div>
 
-<!-- 运行输出 -->
+<!-- 脚本输出 -->
 <div class="sec">
-  <span><span class="dot-live" id="run-dot" style="opacity:0"></span>运行输出</span>
-  <span id="run-status" style="font-size:11px;color:#484f58">空闲</span>
+  <span><span class="dot off" id="run-dot"></span>脚本输出</span>
+  <span id="run-status" style="color:#484f58;font-size:10px">空闲</span>
 </div>
-<div class="terminal" id="terminal">等待运行...</div>
+<div class="terminal" id="terminal">点击"运行批量生成"开始...</div>
 
-<!-- 操作日志 -->
+<!-- AI 行为日志（主要） -->
+<div class="sec" style="margin-top:4px">
+  <span><span class="dot on"></span>小聋女行为日志</span>
+  <span id="ai-log-count" style="color:#484f58;font-size:10px">0 条</span>
+</div>
+<div class="ai-log-wrap" id="ai-log-wrap">
+  <div class="empty">暂无行为记录</div>
+</div>
+
+<!-- 脚本操作日志 -->
 <div class="sec">
-  <span>操作日志</span>
-  <span id="log-count" style="font-size:11px;color:#484f58">0 条</span>
+  <span>脚本接口日志</span>
+  <span id="log-count" style="color:#484f58;font-size:10px">0 条</span>
 </div>
 <div class="log-wrap">
-  <table class="log-table">
-    <tbody id="log-body"><tr><td colspan="4" class="empty">暂无日志</td></tr></tbody>
-  </table>
+  <table class="log-table"><tbody id="log-body"><tr><td colspan="4" class="empty">暂无</td></tr></tbody></table>
 </div>
 
 <div class="footer">
-  <span>自动刷新 3s</span>
-  <span id="last-refresh">--</span>
+  <span>3s 自动刷新</span><span id="last-refresh">--</span>
 </div>
 
 <script>
-var allLogs   = [];
-var lastTs    = 0;
-var outOffset = 0;
-var isRunning = false;
-var pollTimer = null;
-
-// API 地址（同源）
-var base = location.protocol + '//' + location.host;
+var allLogs=[], allAiLogs=[], lastTs=0, lastAiTs=0, outOffset=0, isRunning=false;
+var base = location.protocol+'//'+location.host;
 var pdir = location.pathname.split('/').slice(0,-1).join('/');
 var API  = base + pdir + '/api.php';
 
-// ────── 工具 ──────
-function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function now(){ var d=new Date(); return d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0')+':'+d.getSeconds().toString().padStart(2,'0'); }
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function now(){var d=new Date();return[d.getHours(),d.getMinutes(),d.getSeconds()].map(function(n){return n.toString().padStart(2,'0')}).join(':');}
 
-// ────── 颜色化终端输出 ──────
-function colorLine(line){
-  if(/✓\s*成功/.test(line))  return '<span class="ok">'+esc(line)+'</span>';
-  if(/✗\s*失败/.test(line))  return '<span class="fail">'+esc(line)+'</span>';
-  if(/={3,}|─{3,}/.test(line)) return '<span class="sep">'+esc(line)+'</span>';
-  if(/交易对|控制面板|批量/.test(line)) return '<span class="head">'+esc(line)+'</span>';
-  return esc(line);
+// ── 终端颜色 ──
+function colorLine(l){
+  if(/✓\s*成功/.test(l)) return '<span class="ok">'+esc(l)+'</span>';
+  if(/✗\s*失败/.test(l)) return '<span class="fail">'+esc(l)+'</span>';
+  if(/={4,}|─{4,}/.test(l)) return '<span class="sep">'+esc(l)+'</span>';
+  if(/交易对|批量|控制面板|完成/.test(l)) return '<span class="head">'+esc(l)+'</span>';
+  return esc(l);
 }
-
-// ────── 终端输出 ──────
 function appendTerminal(text){
-  if(!text) return;
-  var el = document.getElementById('terminal');
-  var lines = text.split('\n');
-  var html = lines.map(colorLine).join('\n');
-  el.innerHTML += html;
-  el.scrollTop = el.scrollHeight;
+  if(!text)return;
+  var el=document.getElementById('terminal');
+  el.innerHTML += text.split('\n').map(colorLine).join('\n');
+  el.scrollTop=el.scrollHeight;
 }
 
-// ────── 获取运行输出 ──────
+// ── 运行输出轮询 ──
 function pollOutput(){
   fetch(API+'?action=output&offset='+outOffset)
-    .then(function(r){return r.json();})
-    .then(function(d){
-      appendTerminal(d.text);
-      outOffset = d.offset;
-      if(d.running){
-        isRunning = true;
-        setTimeout(pollOutput, 800);
-      } else if(d.done){
-        isRunning = false;
-        setRunBtn(false);
-        document.getElementById('run-dot').style.opacity = '0';
-        document.getElementById('run-status').textContent = '✓ 完成';
-        fetchStats();
-      }
-    })
-    .catch(function(){setTimeout(pollOutput,2000);});
+    .then(function(r){return r.json();}).then(function(d){
+      appendTerminal(d.text); outOffset=d.offset;
+      if(d.running){isRunning=true;setTimeout(pollOutput,800);}
+      else if(d.done){isRunning=false;setRunBtn(false);document.getElementById('run-dot').className='dot off';document.getElementById('run-status').textContent='✓ 完成';document.getElementById('run-status').style.color='#3fb950';fetchStats();}
+    }).catch(function(){setTimeout(pollOutput,2000);});
 }
-
-// ────── 启动运行 ──────
 function startRun(){
-  document.getElementById('terminal').innerHTML = '';
-  outOffset = 0;
-  fetch(API+'?action=run')
-    .then(function(r){return r.json();})
-    .then(function(d){
-      if(!d.ok){
-        document.getElementById('terminal').innerHTML = '<span class="fail">'+esc(d.msg)+'</span>';
-        return;
-      }
-      isRunning = true;
-      setRunBtn(true);
-      document.getElementById('run-dot').style.opacity = '1';
-      document.getElementById('run-status').textContent = '运行中...';
-      pollOutput();
-    })
-    .catch(function(e){
-      document.getElementById('terminal').innerHTML = '<span class="fail">启动失败: '+esc(e)+'</span>';
-    });
+  document.getElementById('terminal').innerHTML='';
+  outOffset=0;
+  fetch(API+'?action=run').then(function(r){return r.json();}).then(function(d){
+    if(!d.ok){document.getElementById('terminal').innerHTML='<span class="fail">'+esc(d.msg)+'</span>';return;}
+    isRunning=true;setRunBtn(true);
+    document.getElementById('run-dot').className='dot on';
+    document.getElementById('run-status').textContent='运行中...';
+    document.getElementById('run-status').style.color='#3fb950';
+    pollOutput();
+  });
 }
+function setRunBtn(r){var b=document.getElementById('btn-run');b.disabled=r;b.textContent=r?'⏳ 运行中...':'▶ 运行批量生成';}
+function clearOutputLog(){document.getElementById('terminal').innerHTML='空终端';}
 
-function setRunBtn(running){
-  var btn = document.getElementById('btn-run');
-  btn.disabled  = running;
-  btn.textContent = running ? '⏳ 运行中...' : '▶ 运行批量生成';
-}
-
-// ────── 清空日志 ──────
-function clearLog(){
-  if(!confirm('确认清空操作日志？')) return;
-  var el = document.getElementById('terminal');
-  el.innerHTML = '';
-  allLogs = [];
-  lastTs = 0;
-  renderLogs();
-  fetch(API+'?action=clear_log').catch(function(){});
-}
-
-// ────── 统计 ──────
+// ── 统计 ──
 function fetchStats(){
-  fetch(API+'?action=stats')
-    .then(function(r){return r.json();})
-    .then(function(d){
-      document.getElementById('s-ok').textContent    = d.api_ok;
-      document.getElementById('s-fail').textContent  = d.api_fail;
-      document.getElementById('s-sym').textContent   = d.symbols_done;
-      document.getElementById('s-sql').textContent   = d.sql_writes;
-      document.getElementById('s-batch').textContent = d.batch_runs;
-      document.getElementById('s-files').textContent = d.sql_files;
-      document.getElementById('srv-time').textContent = d.server_time;
-      // AI
-      if(d.ai){
-        document.getElementById('ai-cost').textContent = '$'+parseFloat(d.ai.cost_usd||0).toFixed(4);
-        var tk = (d.ai.tokens_in||0)+(d.ai.tokens_out||0);
-        document.getElementById('ai-tk').textContent = tk.toLocaleString()+' tokens';
-        document.getElementById('ai-mdl').textContent = d.ai.model||'--';
-      }
-      // 如果有任务在跑但我们不知道
-      if(d.running && !isRunning){
-        isRunning = true;
-        setRunBtn(true);
-        document.getElementById('run-dot').style.opacity='1';
-        document.getElementById('run-status').textContent='运行中...';
-        pollOutput();
-      }
-      document.getElementById('last-refresh').textContent = '刷新 '+now();
-    })
-    .catch(function(){});
+  fetch(API+'?action=stats').then(function(r){return r.json();}).then(function(d){
+    document.getElementById('s-ok').textContent    = d.api_ok;
+    document.getElementById('s-fail').textContent  = d.api_fail;
+    document.getElementById('s-sym').textContent   = d.symbols_done;
+    document.getElementById('s-sql').textContent   = d.sql_writes;
+    document.getElementById('s-batch').textContent = d.batch_runs;
+    document.getElementById('s-files').textContent = d.sql_files;
+    document.getElementById('srv-time').textContent = d.server_time;
+    if(d.ai){
+      document.getElementById('ai-cost').textContent='$'+parseFloat(d.ai.cost_usd||0).toFixed(4);
+      document.getElementById('ai-tk').textContent=((d.ai.tokens_in||0)+(d.ai.tokens_out||0)).toLocaleString()+' tokens';
+    }
+    if(d.last_activity){
+      document.getElementById('ai-doing').textContent=d.last_activity;
+      document.getElementById('ai-dot').className='ai-dot active';
+    }
+    if(d.running&&!isRunning){isRunning=true;setRunBtn(true);document.getElementById('run-dot').className='dot on';pollOutput();}
+    document.getElementById('last-refresh').textContent='刷新 '+now();
+  }).catch(function(){});
 }
 
-// ────── 日志 ──────
-function fetchLogs(){
-  fetch(API+'?action=logs&limit=200&since='+lastTs)
-    .then(function(r){return r.json();})
-    .then(function(data){
-      if(data.logs && data.logs.length>0){
-        allLogs = allLogs.concat(data.logs);
-        var seen={};
-        allLogs = allLogs.filter(function(l){
-          var k=l.ts+l.action+(l.detail||'');
-          if(seen[k]) return false; seen[k]=true; return true;
-        });
-        lastTs = allLogs[allLogs.length-1].ts;
-        renderLogs();
-      }
-    })
-    .catch(function(){});
+// ── AI 行为日志 ──
+var typeLabel={'CMD':'💻 命令','FILE':'📄 文件','HTTP':'🌐 请求','GIT':'📦 Git','THINK':'💭 思考','MSG':'💬 消息'};
+function fetchAiLogs(){
+  fetch(API+'?action=ai_logs&limit=100&since='+lastAiTs).then(function(r){return r.json();}).then(function(data){
+    if(!data.logs||!data.logs.length)return;
+    allAiLogs=allAiLogs.concat(data.logs);
+    var seen={};
+    allAiLogs=allAiLogs.filter(function(l){var k=l.ts+(l.what||'');if(seen[k])return false;seen[k]=true;return true;});
+    lastAiTs=allAiLogs[allAiLogs.length-1].ts;
+    renderAiLogs();
+    // 更新 AI 状态
+    var last=allAiLogs[allAiLogs.length-1];
+    if(last){document.getElementById('ai-doing').textContent=last.what||'';document.getElementById('ai-dot').className='ai-dot active';}
+  }).catch(function(){});
 }
-
-function renderLogs(){
-  var tbody = document.getElementById('log-body');
-  if(!allLogs.length){ tbody.innerHTML='<tr><td colspan="4" class="empty">暂无日志</td></tr>'; return; }
+function renderAiLogs(){
+  var wrap=document.getElementById('ai-log-wrap');
+  if(!allAiLogs.length){wrap.innerHTML='<div class="empty">暂无行为记录</div>';return;}
   var html='';
-  var disp = allLogs.slice().reverse().slice(0,80);
+  var disp=allAiLogs.slice().reverse().slice(0,50);
   for(var i=0;i<disp.length;i++){
     var l=disp[i];
-    var tClass = 'tag tag-'+(l.action||'');
-    var st = l.status==='OK'  ? '<span class="status-ok">✓</span>' :
-             l.status==='FAIL'? '<span class="status-fail">✗</span>' : (l.status||'');
-    var detail = (l.detail||'').length>45 ? (l.detail||'').substring(0,42)+'…' : (l.detail||'');
-    html += '<tr>'
-          + '<td class="tcol">'+(l.time||'').substring(11)+'</td>'
-          + '<td><span class="'+tClass+'">'+(l.action||'')+'</span></td>'
-          + '<td>'+st+'</td>'
-          + '<td class="dcol">'+esc(detail)+'</td>'
-          + '</tr>';
+    var t=l.type||'CMD';
+    var lbl=(typeLabel[t]||t);
+    var timeStr=(l.time||'').substring(11);
+    html+='<div class="ai-log-item">'
+        +'<div class="ai-log-meta">'
+        +'<span class="ai-log-type type-'+t+'">'+lbl+'</span>'
+        +'<span class="ai-log-time">'+esc(timeStr)+'</span>'
+        +'</div>'
+        +'<div class="ai-log-what">'+esc(l.what||'')+'</div>'
+        +(l.detail?'<div class="ai-log-detail">'+esc(l.detail)+'</div>':'')
+        +'</div>';
   }
-  tbody.innerHTML = html;
-  document.getElementById('log-count').textContent = allLogs.length+' 条';
+  wrap.innerHTML=html;
+  document.getElementById('ai-log-count').textContent=allAiLogs.length+' 条';
 }
 
-// ────── 主循环 ──────
-fetchStats();
-fetch(API+'?action=logs&limit=200')
-  .then(function(r){return r.json();})
-  .then(function(d){
-    allLogs = d.logs||[];
-    if(allLogs.length) lastTs=allLogs[allLogs.length-1].ts;
+// ── 脚本接口日志 ──
+function fetchLogs(){
+  fetch(API+'?action=logs&limit=100&since='+lastTs).then(function(r){return r.json();}).then(function(data){
+    if(!data.logs||!data.logs.length)return;
+    allLogs=allLogs.concat(data.logs);
+    var seen={};
+    allLogs=allLogs.filter(function(l){var k=l.ts+l.action+(l.detail||'');if(seen[k])return false;seen[k]=true;return true;});
+    lastTs=allLogs[allLogs.length-1].ts;
     renderLogs();
+  }).catch(function(){});
+}
+function renderLogs(){
+  var tbody=document.getElementById('log-body');
+  if(!allLogs.length){tbody.innerHTML='<tr><td colspan="4" class="empty">暂无</td></tr>';return;}
+  var html='';
+  allLogs.slice().reverse().slice(0,60).forEach(function(l){
+    var st=l.status==='OK'?'<span class="ok-s">✓</span>':l.status==='FAIL'?'<span class="fail-s">✗</span>':(l.status||'');
+    var det=(l.detail||'').length>40?(l.detail||'').substring(0,38)+'…':(l.detail||'');
+    html+='<tr><td class="tcol">'+(l.time||'').substring(11)+'</td><td><span class="tag tag-'+(l.action||'')+'">'+(l.action||'')+'</span></td><td>'+st+'</td><td class="dcol">'+esc(det)+'</td></tr>';
   });
+  tbody.innerHTML=html;
+  document.getElementById('log-count').textContent=allLogs.length+' 条';
+}
 
-setInterval(function(){ fetchStats(); fetchLogs(); }, 3000);
+// ── 初始化 ──
+fetchStats();
+Promise.all([
+  fetch(API+'?action=ai_logs&limit=100').then(function(r){return r.json();}),
+  fetch(API+'?action=logs&limit=100').then(function(r){return r.json();})
+]).then(function(results){
+  allAiLogs=results[0].logs||[];if(allAiLogs.length)lastAiTs=allAiLogs[allAiLogs.length-1].ts;
+  allLogs=results[1].logs||[];if(allLogs.length)lastTs=allLogs[allLogs.length-1].ts;
+  renderAiLogs();renderLogs();
+});
+setInterval(function(){fetchStats();fetchAiLogs();fetchLogs();},3000);
 </script>
 </body>
 </html>
