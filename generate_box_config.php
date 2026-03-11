@@ -198,9 +198,14 @@ function calc_depth_median_qty($orderBook, $depth)
     return number_format($base, 1, '.', '');
 }
 
-function make_number_float($avgQty, $stepSize)
+/**
+ * 生成 number_float 区间
+ * $ratio: 相对中位数的比例系数
+ *   近盘用较小系数（量薄，自然），中远盘用较大系数（量厚，承接滑点）
+ */
+function make_number_float($medianQty, $stepSize, $ratio = '0.2')
 {
-    $base = bcmul($avgQty, '0.2', 20);
+    $base = bcmul($medianQty, $ratio, 20);
     if (bccomp($base, $stepSize) < 0) {
         $base = $stepSize;
     }
@@ -270,13 +275,13 @@ function generate_configs($symbol, $levels, $totalUsdt, $pid, $currentPrice, $lo
     // 买卖各占一半
     $oneSideTrust = (int)floor($totalTrust / 2);
 
-    // 近盘：前5档中位数（去最大值），接近自然挂单
+    // 近盘：前5档中位数 × 0.08（薄铺，自然，不压过中远盘）
     $nearMedianQty  = calc_depth_median_qty($orderBook, DEPTH_NEAR);
-    // 中远盘：前20档中位数
+    // 中远盘：前20档中位数 × 0.2（量厚，承接大单/滑点）
     $otherMedianQty = calc_depth_median_qty($orderBook, DEPTH_OTHER);
 
-    $nearNumberFloat  = make_number_float($nearMedianQty, $stepSize);
-    $otherNumberFloat = make_number_float($otherMedianQty, $stepSize);
+    $nearNumberFloat  = make_number_float($nearMedianQty, $stepSize, '0.08');
+    $otherNumberFloat = make_number_float($otherMedianQty, $stepSize, '0.2');
 
     // 近盘 trust_num = tick数 × 填充率（但不超过单侧总量的 30%）
     $nearTrustPerDom = max(1, (int)round(NEAR_TICKS_PER_DOM * NEAR_FILL_RATE));
