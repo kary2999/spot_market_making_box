@@ -20,6 +20,9 @@
 bcscale(20);
 
 define('BINANCE_BASE_URL', 'https://api.binance.com');
+define('GATE_BASE_URL',    'https://api.gateio.ws');
+define('KUCOIN_BASE_URL',  'https://api.kucoin.com');
+define('BITGET_BASE_URL',  'https://api.bitget.com');
 define('EXCHANGE_INFO_URL', 'https://app.nn88zl.com/spot/read/pub/exchangeInfo?app_id=AwyOTFRlsfQ5mRkqwCNaEd5T');
 define('REQUEST_TIMEOUT', 10);
 
@@ -148,6 +151,111 @@ function get_binance_order_book($symbol, $limit = 20)
         'symbol' => normalize_symbol($symbol),
         'limit'  => $limit,
     ));
+}
+
+// ==================== Gate.io API ====================
+
+function gate_symbol($symbol)
+{
+    return strtoupper(str_replace('_', '_', $symbol));  // gate 格式本身就是 BTC_USDT
+}
+
+function get_gate_price($symbol)
+{
+    $data = http_get(GATE_BASE_URL . '/api/v4/spot/tickers?currency_pair=' . gate_symbol($symbol));
+    if (empty($data) || !isset($data[0]['last'])) {
+        throw new RuntimeException("Gate 无此交易对: {$symbol}");
+    }
+    return $data[0]['last'];
+}
+
+function get_gate_order_book($symbol, $limit = 20)
+{
+    $data = http_get(GATE_BASE_URL . '/api/v4/spot/order_book?currency_pair=' . gate_symbol($symbol) . '&limit=' . $limit);
+    if (empty($data) || !isset($data['bids'])) {
+        throw new RuntimeException("Gate 深度数据异常: {$symbol}");
+    }
+    // 转为币安格式 [price, qty]
+    return array('bids' => $data['bids'], 'asks' => $data['asks']);
+}
+
+// ==================== KuCoin API ====================
+
+function kucoin_symbol($symbol)
+{
+    return strtoupper(str_replace('_', '-', $symbol));  // BTC-USDT
+}
+
+function get_kucoin_price($symbol)
+{
+    $data = http_get(KUCOIN_BASE_URL . '/api/v1/market/orderbook/level1?symbol=' . kucoin_symbol($symbol));
+    if (empty($data['data']['price'])) {
+        throw new RuntimeException("KuCoin 无此交易对: {$symbol}");
+    }
+    return $data['data']['price'];
+}
+
+function get_kucoin_order_book($symbol, $limit = 20)
+{
+    $data = http_get(KUCOIN_BASE_URL . '/api/v1/market/orderbook/level2_' . $limit . '?symbol=' . kucoin_symbol($symbol));
+    if (empty($data['data']['bids'])) {
+        throw new RuntimeException("KuCoin 深度数据异常: {$symbol}");
+    }
+    return array('bids' => $data['data']['bids'], 'asks' => $data['data']['asks']);
+}
+
+// ==================== Bitget API ====================
+
+function bitget_symbol($symbol)
+{
+    return strtoupper(str_replace('_', '', $symbol));  // BTCUSDT
+}
+
+function get_bitget_price($symbol)
+{
+    $data = http_get(BITGET_BASE_URL . '/api/v2/spot/market/tickers?symbol=' . bitget_symbol($symbol));
+    if (empty($data['data'][0]['lastPr'])) {
+        throw new RuntimeException("Bitget 无此交易对: {$symbol}");
+    }
+    return $data['data'][0]['lastPr'];
+}
+
+function get_bitget_order_book($symbol, $limit = 20)
+{
+    $data = http_get(BITGET_BASE_URL . '/api/v2/spot/market/orderbook?symbol=' . bitget_symbol($symbol) . '&limit=' . $limit);
+    if (empty($data['data']['bids'])) {
+        throw new RuntimeException("Bitget 深度数据异常: {$symbol}");
+    }
+    return array('bids' => $data['data']['bids'], 'asks' => $data['data']['asks']);
+}
+
+// ==================== 多交易所回退 ====================
+
+/**
+ * 依次尝试：币安 → Gate → KuCoin → Bitget
+ * 返回 array('price'=>..., 'orderBook'=>..., 'source'=>...)
+ */
+function get_market_data($symbol, $limit = 20)
+{
+    $exchanges = array(
+        'binance' => array('get_binance_price', 'get_binance_order_book'),
+        'gate'    => array('get_gate_price',    'get_gate_order_book'),
+        'kucoin'  => array('get_kucoin_price',  'get_kucoin_order_book'),
+        'bitget'  => array('get_bitget_price',  'get_bitget_order_book'),
+    );
+
+    $lastError = '';
+    foreach ($exchanges as $name => $fns) {
+        try {
+            $price     = call_user_func($fns[0], $symbol);
+            $orderBook = call_user_func($fns[1], $symbol, $limit);
+            return array('price' => $price, 'orderBook' => $orderBook, 'source' => $name);
+        } catch (Exception $e) {
+            $lastError = "[{$name}] " . $e->getMessage();
+        }
+    }
+
+    throw new RuntimeException("所有交易所均无此交易对: {$symbol} | 最后错误: {$lastError}");
 }
 
 // ==================== 工具 ====================
@@ -579,16 +687,18 @@ function main()
     }
     echo "[本所] price_precision={$localInfo['price_precision']}  tickSize={$localInfo['tickSize']}  min_trade={$localInfo['min_trade']}\n";
 
-    // 2. 币安价格+深度
-    echo "[币安] 正在获取参考价格和深度...\n";
+    // 2. 行情数据（币安→Gate→KuCoin→Bitget）
+    echo "[行情] 正在获取参考价格和深度...\n";
     try {
-        $currentPrice = get_binance_price($symbol);
-        $orderBook    = get_binance_order_book($symbol, 20);
+        $marketData   = get_market_data($symbol, 20);
+        $currentPrice = $marketData['price'];
+        $orderBook    = $marketData['orderBook'];
+        $source       = $marketData['source'];
     } catch (Exception $e) {
-        fwrite(STDERR, "[错误] 币安: " . $e->getMessage() . "\n");
+        fwrite(STDERR, "[错误] " . $e->getMessage() . "\n");
         exit(1);
     }
-    echo "[币安] 参考价格: {$currentPrice}\n";
+    echo "[{$source}] 参考价格: {$currentPrice}\n";
 
     // 3. 生成
     $configs = generate_configs(

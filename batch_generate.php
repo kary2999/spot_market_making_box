@@ -98,9 +98,11 @@ function batch_main()
             // 1. 本所精度
             $localInfo = get_local_exchange_info($symbol);
 
-            // 2. 币安价格+深度
-            $currentPrice = get_binance_price($symbol);
-            $orderBook    = get_binance_order_book($symbol, 20);
+            // 2. 行情数据（币安→Gate→KuCoin→Bitget）
+            $marketData   = get_market_data($symbol, 20);
+            $currentPrice = $marketData['price'];
+            $orderBook    = $marketData['orderBook'];
+            $source       = $marketData['source'];
 
             // 3. 生成配置
             $configs = generate_configs(
@@ -119,11 +121,12 @@ function batch_main()
             }
 
             $elapsed = round(microtime(true) - $start, 2);
-            printf(" %-6d %-20s %-10s %-8s 价格:%s 近盘:%dticks\n",
+            printf(" %-6d %-20s %-10s %-8s [%s] 价格:%s 近盘:%dticks\n",
                 $pid,
                 strtoupper($symbol),
                 '✓ 成功',
                 $elapsed,
+                $source,
                 $currentPrice,
                 calc_near_ticks($currentPrice, $localInfo['tickSize'])
             );
