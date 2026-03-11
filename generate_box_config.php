@@ -14,7 +14,7 @@
  *
  * 用法:
  *   php generate_box_config.php --symbol trx_usdt --pid 3 --levels 9 \
- *       --total_usdt 2000000 --depth_ratio 0.3
+ *       --total_usdt 2000000 --depth_ratio 0.3 --total_trust 800
  */
 
 bcscale(20);
@@ -227,7 +227,7 @@ function build_price_ranges($currentPrice, $tickSize, $levels, $direction, $near
 
 // ==================== 配置生成 ====================
 
-function generate_configs($symbol, $levels, $totalUsdt, $pid, $currentPrice, $localInfo, $orderBook)
+function generate_configs($symbol, $levels, $totalUsdt, $pid, $currentPrice, $localInfo, $orderBook, $totalTrust)
 {
     $tickSize = $localInfo['tickSize'];
     $stepSize = $localInfo['stepSize'];
@@ -235,17 +235,25 @@ function generate_configs($symbol, $levels, $totalUsdt, $pid, $currentPrice, $lo
     $nearLevels = ($levels > 6) ? 2 : 1;
     $remainLevels = $levels - $nearLevels;
 
-    $totalTrust = 1000;
+    // 买卖各占一半
+    $oneSideTrust = (int)floor($totalTrust / 2);
 
     $nearDepthQty  = calc_depth_avg_qty($orderBook, DEPTH_NEAR);
     $otherDepthQty = calc_depth_avg_qty($orderBook, DEPTH_OTHER);
     $nearNumberFloat  = make_number_float($nearDepthQty, $stepSize);
     $otherNumberFloat = make_number_float($otherDepthQty, $stepSize);
 
-    // 近盘 trust_num = tick数 × 填充率
+    // 近盘 trust_num = tick数 × 填充率（但不超过单侧总量的 30%）
     $nearTrustPerDom = max(1, (int)round(NEAR_TICKS_PER_DOM * NEAR_FILL_RATE));
-    $nearTrustTotal = $nearTrustPerDom * $nearLevels;
-    $remainTrustTotal = $totalTrust - $nearTrustTotal;
+    $nearTrustTotal  = $nearTrustPerDom * $nearLevels;
+
+    // 如果近盘超出单侧总量，等比压缩
+    if ($nearTrustTotal > $oneSideTrust) {
+        $nearTrustPerDom = max(1, (int)floor($oneSideTrust / $nearLevels));
+        $nearTrustTotal  = $nearTrustPerDom * $nearLevels;
+    }
+
+    $remainTrustTotal  = $oneSideTrust - $nearTrustTotal;
     $remainTrustPerDom = $remainLevels > 0 ? max(1, (int)round($remainTrustTotal / $remainLevels)) : 0;
 
     $configs = array();
@@ -364,7 +372,7 @@ function pct_to_actual($priceFloatPct, $refPrice, $pricePrecision)
     return $low . ' ~ ' . $high;
 }
 
-function print_output($configs, $levels, $currentPrice, $localInfo, $symbol, $pid, $totalUsdt, $depthRatio)
+function print_output($configs, $levels, $currentPrice, $localInfo, $symbol, $pid, $totalUsdt, $depthRatio, $totalTrust)
 {
     $tickSize       = $localInfo['tickSize'];
     $pricePrecision = $localInfo['price_precision'];
@@ -380,6 +388,7 @@ function print_output($configs, $levels, $currentPrice, $localInfo, $symbol, $pi
     echo "  本所精度   : 价格 {$pricePrecision} 位 (tickSize={$tickSize})   数量 {$localInfo['number_precision']} 位\n";
     echo "  最小挂单量 : {$localInfo['min_trade']}   最大: {$localInfo['max_trade']}\n";
     echo sprintf("  pid: %d   levels: %d   total: %s USDT\n", $pid, $levels, number_format($totalUsdt, 0));
+    echo sprintf("  委托上限   : 买卖合计 %d 单（单侧 %d）\n", $totalTrust, (int)floor($totalTrust / 2));
     echo "  近盘: 每档 " . NEAR_TICKS_PER_DOM . " 价格位 × {$nearLevels} 档 = {$totalNearTicks} 价格位 ({$nearPct}%)\n";
     echo "  填充率: " . (NEAR_FILL_RATE * 100) . "% → trust_num = " . (int)round(NEAR_TICKS_PER_DOM * NEAR_FILL_RATE) . "\n";
     echo "{$sep}\n\n";
@@ -435,22 +444,25 @@ function parse_args()
 {
     $opts = getopt('', array(
         'symbol:', 'pid:', 'levels:', 'total_usdt:', 'depth_ratio:', 'output_dir:',
+        'total_trust:',
     ));
 
     if (empty($opts['symbol']) || !isset($opts['pid'])) {
         echo "用法: php generate_box_config.php --symbol trx_usdt --pid 3 --levels 9 \\\n";
-        echo "      --total_usdt 2000000 --depth_ratio 0.3\n\n";
+        echo "      --total_usdt 2000000 --depth_ratio 0.3 --total_trust 800\n\n";
+        echo "  --total_trust  买卖合计委托上限（默认 800，单侧各 400）\n";
         echo "精度自动从本所 exchangeInfo 获取，无需手动指定。\n";
         exit(1);
     }
 
     return array(
-        'symbol'      => strtolower($opts['symbol']),
-        'pid'         => (int)$opts['pid'],
-        'levels'      => isset($opts['levels']) ? (int)$opts['levels'] : 9,
-        'total_usdt'  => isset($opts['total_usdt']) ? (float)$opts['total_usdt'] : 1000000.0,
-        'depth_ratio' => isset($opts['depth_ratio']) ? (float)$opts['depth_ratio'] : 0.2,
-        'output_dir'  => isset($opts['output_dir']) ? $opts['output_dir'] : 'output',
+        'symbol'       => strtolower($opts['symbol']),
+        'pid'          => (int)$opts['pid'],
+        'levels'       => isset($opts['levels']) ? (int)$opts['levels'] : 9,
+        'total_usdt'   => isset($opts['total_usdt']) ? (float)$opts['total_usdt'] : 1000000.0,
+        'depth_ratio'  => isset($opts['depth_ratio']) ? (float)$opts['depth_ratio'] : 0.2,
+        'output_dir'   => isset($opts['output_dir']) ? $opts['output_dir'] : 'output',
+        'total_trust'  => isset($opts['total_trust']) ? (int)$opts['total_trust'] : 800,
     );
 }
 
@@ -483,12 +495,12 @@ function main()
     // 3. 生成
     $configs = generate_configs(
         $symbol, $args['levels'], $args['total_usdt'], $args['pid'],
-        $currentPrice, $localInfo, $orderBook
+        $currentPrice, $localInfo, $orderBook, $args['total_trust']
     );
 
     // 4. 输出
     print_output($configs, $args['levels'], $currentPrice, $localInfo,
-        $symbol, $args['pid'], $args['total_usdt'], $args['depth_ratio']);
+        $symbol, $args['pid'], $args['total_usdt'], $args['depth_ratio'], $args['total_trust']);
 
     $sqlPath = $args['output_dir'] . '/' . $symbol . '_pid' . $args['pid'] . '.sql';
     generate_sql($configs, $sqlPath);
